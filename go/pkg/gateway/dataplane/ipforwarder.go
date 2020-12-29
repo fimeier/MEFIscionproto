@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//   http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -93,7 +93,7 @@ func (f *IPForwarder) Run() error {
 			continue
 		}
 
-		packet := f.parse(ipVersion, buf)
+		packet := f.parse(ipVersion, buf[:length])
 		if packet.ErrorLayer() != nil {
 			metrics.CounterInc(f.Metrics.IPPktsInvalid)
 			log.SafeDebug(f.Logger, "forwarder: failed to parse packet",
@@ -107,7 +107,7 @@ func (f *IPForwarder) Run() error {
 			continue
 		}
 
-		session.Write(buf[:length])
+		session.Write(packet)
 	}
 }
 

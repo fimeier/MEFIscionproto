@@ -30,6 +30,10 @@ def build_tester_image():
         srcs = [
             "files/tester.sh",
             "files/sig_setup.sh",
+            "files/ssh_setup.sh",
+            "files/id_rsa",
+            "files/id_rsa.pub",
+            "files/ssh_config",
         ],
         package_dir = "share",
     )
@@ -37,7 +41,10 @@ def build_tester_image():
     container_image(
         name = "tester",
         base = "@debian10//image",
-        env = {"TZ": "UTC"},
+        env = {
+            "TZ": "UTC",
+            "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/share/bin",
+        },
         debs = [
             # iptables and its dependencies (only not already present)
             packages["gcc-8-base"],
@@ -59,11 +66,52 @@ def build_tester_image():
             packages["libprocps7"],
             packages["lsb-base"],
             packages["psmisc"],
+            # iperf
+            packages["iperf"],
         ],
         tars = [
             ":share",
         ],
         workdir = "/share",
+        cmd = "tail -f /dev/null",
+        visibility = ["//visibility:public"],
+    )
+
+    pkg_tar(
+        name = "bbcp_binary",
+        srcs = ["@com_github_eeertekin_bbcp//:bbcp_binary"],
+        mode = "0755",
+        package_dir = "bin",
+    )
+
+    pkg_tar(
+        name = "bbcp_sources",
+        srcs = ["@com_github_eeertekin_bbcp//:bbcp_sources"],
+        mode = "0444",
+        package_dir = "src",
+    )
+
+    container_image(
+        name = "bbcp_tester",
+        base = ":tester",
+        debs = [
+            # dependencies of bbcp
+            packages["openssh-server"],
+            packages["openssh-client"],
+            packages["libssl1.1"],
+            packages["libwrap0"],
+            packages["libkrb5-3"],
+            packages["libgssapi-krb5-2"],
+            packages["libk5crypto3"],
+            packages["libkrb5support0"],
+            packages["libkeyutils1"],
+            # dependecies of brctl
+            packages["bridge-utils"],
+        ],
+        tars = [
+            ":bbcp_binary",
+            ":bbcp_sources",
+        ],
         cmd = "tail -f /dev/null",
         visibility = ["//visibility:public"],
     )

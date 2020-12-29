@@ -21,18 +21,6 @@ import (
 	"github.com/scionproto/scion/go/lib/log"
 )
 
-func setupLog(level string) error {
-	if len(level) == 0 || level == "none" {
-		return nil
-	}
-	return log.Setup(log.Config{
-		Console: log.ConsoleConfig{
-			Level:           level,
-			StacktraceLevel: "none",
-		},
-	})
-}
-
 func setupTracer(componentName, agent string) (func(), error) {
 	if len(agent) == 0 {
 		return func() {}, nil

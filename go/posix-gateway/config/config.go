@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//   http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -27,7 +27,7 @@ type Config struct {
 	Features env.Features          `toml:"features,omitempty"`
 	Logging  log.Config            `toml:"log,omitempty"`
 	Metrics  env.Metrics           `toml:"metrics,omitempty"`
-	Daemon   env.SCIONDClient      `toml:"sciond_connection,omitempty"`
+	Daemon   env.Daemon            `toml:"sciond_connection,omitempty"`
 	Gateway  gatewayconfig.Gateway `toml:"gateway,omitempty"`
 	Tunnel   gatewayconfig.Tunnel  `toml:"tunnel,omitempty"`
 }

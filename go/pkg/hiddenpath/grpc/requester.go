@@ -18,6 +18,7 @@ import (
 	"context"
 	"net"
 
+	"github.com/golang/protobuf/proto"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/scionproto/scion/go/lib/ctrl/seg"
@@ -25,7 +26,7 @@ import (
 	"github.com/scionproto/scion/go/lib/serrors"
 	libgrpc "github.com/scionproto/scion/go/pkg/grpc"
 	"github.com/scionproto/scion/go/pkg/hiddenpath"
-	hppb "github.com/scionproto/scion/go/pkg/proto/hidden_segment"
+	hspb "github.com/scionproto/scion/go/pkg/proto/hidden_segment"
 )
 
 // Requester fetches segments from a remote using gRPC.
@@ -93,9 +94,9 @@ func (f *Requester) hiddenSegments(ctx context.Context, req segfetcher.Request,
 		return nil, nil
 	}
 
-	client := hppb.NewHiddenSegmentLookupServiceClient(conn)
+	client := hspb.NewHiddenSegmentLookupServiceClient(conn)
 	rep, err := client.HiddenSegments(ctx,
-		&hppb.HiddenSegmentsRequest{
+		&hspb.HiddenSegmentsRequest{
 			GroupIds: groups,
 			DstIsdAs: uint64(req.Dst.IAInt()),
 		},
@@ -104,8 +105,58 @@ func (f *Requester) hiddenSegments(ctx context.Context, req segfetcher.Request,
 	if err != nil {
 		return nil, err
 	}
+	return unpackSegs(rep.Segments)
+}
+
+// AuthoritativeRequester requests hidden segments from an authoritative server.
+type AuthoritativeRequester struct {
+	// Dialer dials a new gRPC connection.
+	Dialer libgrpc.Dialer
+	// Signer is used to sign the requests.
+	Signer Signer
+}
+
+// HiddenSegments requests from the authoritative server.
+func (r AuthoritativeRequester) HiddenSegments(ctx context.Context,
+	req hiddenpath.SegmentRequest, server net.Addr) ([]*seg.Meta, error) {
+
+	conn, err := r.Dialer.Dial(ctx, server)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	groups := []uint64{}
+	for _, id := range req.GroupIDs {
+		groups = append(groups, id.ToUint64())
+	}
+
+	pbReq := &hspb.HiddenSegmentsRequest{
+		GroupIds: groups,
+		DstIsdAs: uint64(req.DstIA.IAInt()),
+	}
+	rawReq, err := proto.Marshal(pbReq)
+	if err != nil {
+		return nil, serrors.WrapStr("marshaling request", err)
+	}
+	signedReq, err := r.Signer.Sign(ctx, rawReq)
+	if err != nil {
+		return nil, serrors.WrapStr("signing request", err)
+	}
+
+	client := hspb.NewAuthoritativeHiddenSegmentLookupServiceClient(conn)
+	rep, err := client.AuthoritativeHiddenSegments(ctx, &hspb.AuthoritativeHiddenSegmentsRequest{
+		SignedRequest: signedReq,
+	}, libgrpc.RetryProfile...)
+	if err != nil {
+		return nil, err
+	}
+	return unpackSegs(rep.Segments)
+}
+
+func unpackSegs(pbSegs map[int32]*hspb.Segments) ([]*seg.Meta, error) {
 	var segs []*seg.Meta
-	for segType, segments := range rep.Segments {
+	for segType, segments := range pbSegs {
 		for i, pb := range segments.Segments {
 			ps, err := seg.SegmentFromPB(pb)
 			if err != nil {

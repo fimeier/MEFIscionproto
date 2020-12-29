@@ -17,13 +17,16 @@ package main
 import (
 	"context"
 	"fmt"
+	"net"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 
 	"github.com/scionproto/scion/go/lib/addr"
-	"github.com/scionproto/scion/go/lib/sciond"
+	"github.com/scionproto/scion/go/lib/daemon"
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/tracing"
 	"github.com/scionproto/scion/go/pkg/app"
@@ -40,6 +43,10 @@ func newShowpaths(pather CommandPather) *cobra.Command {
 		noColor    bool
 		tracer     string
 	}
+
+	v := viper.NewWithOptions(
+		viper.EnvKeyReplacer(strings.NewReplacer("SCIOND", "DAEMON", "LOCAL", "LOCAL_ADDR")),
+	)
 
 	var cmd = &cobra.Command{
 		Use:     "showpaths",
@@ -65,13 +72,18 @@ If no alive path is discovered, json output is not enabled, and probing is not
 disabled, showpaths will exit with the code 1.
 On other errors, showpaths will exit with code 2.
 
-%s`, filterHelp),
+%s`, app.SequenceHelp),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			v.SetEnvPrefix("scion")
+			if err := v.BindPFlags(cmd.Flags()); err != nil {
+				return serrors.WrapStr("binding flags", err)
+			}
+			v.AutomaticEnv()
 			dst, err := addr.IAFromString(args[0])
 			if err != nil {
 				return serrors.WrapStr("invalid destination ISD-AS", err)
 			}
-			if err := setupLog(flags.logLevel); err != nil {
+			if err := app.SetupLog(flags.logLevel); err != nil {
 				return serrors.WrapStr("setting up logging", err)
 			}
 			closer, err := setupTracer("showpaths", flags.tracer)
@@ -79,6 +91,9 @@ On other errors, showpaths will exit with code 2.
 				return serrors.WrapStr("setting up tracing", err)
 			}
 			defer closer()
+
+			flags.cfg.Daemon = v.GetString("sciond")
+			flags.cfg.Local = net.ParseIP(v.GetString("local"))
 
 			cmd.SilenceUsage = true
 
@@ -107,11 +122,10 @@ On other errors, showpaths will exit with code 2.
 		},
 	}
 
-	cmd.Flags().StringVar(&flags.cfg.SCIOND, "sciond",
-		sciond.DefaultAPIAddress, "SCION Deamon address")
+	cmd.Flags().StringVar(&flags.cfg.Daemon, "sciond",
+		daemon.DefaultAPIAddress, "SCION Deamon address")
 	cmd.Flags().DurationVar(&flags.timeout, "timeout", 5*time.Second, "Timeout")
-	cmd.Flags().StringVar(&flags.cfg.Sequence, "sequence",
-		"", "sequence space separated list of HPs")
+	cmd.Flags().StringVar(&flags.cfg.Sequence, "sequence", "", app.SequenceUsage)
 	cmd.Flags().IntVarP(&flags.cfg.MaxPaths, "maxpaths", "m", 10,
 		"Maximum number of paths that are displayed")
 	cmd.Flags().BoolVarP(&flags.expiration, "expiration", "e", false,
@@ -125,8 +139,7 @@ On other errors, showpaths will exit with code 2.
 	cmd.Flags().BoolVar(&flags.noColor, "no-color", false, "disable colored output")
 	cmd.Flags().IPVarP(&flags.cfg.Local, "local", "l", nil,
 		"Optional local IP address to use for probing health checks")
-	cmd.Flags().StringVar(&flags.logLevel, "log.level", "", "Console logging level verbosity "+
-		"(debug|info|error)")
+	cmd.Flags().StringVar(&flags.logLevel, "log.level", "", app.LogLevelUsage)
 	cmd.Flags().StringVar(&flags.tracer, "tracing.agent", "", "Tracing agent address")
 	return cmd
 }

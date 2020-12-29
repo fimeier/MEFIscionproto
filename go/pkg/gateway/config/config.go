@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//   http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -47,8 +47,6 @@ type Gateway struct {
 	CtrlAddr string `toml:"ctrl_addr,omitempty"`
 	// Data plane address, for frames.
 	DataAddr string `toml:"data_addr,omitempty"`
-	// SCION dispatcher path.
-	Dispatcher string `toml:"dispatcher,omitempty"`
 }
 
 func (cfg *Gateway) Validate() error {
@@ -57,9 +55,6 @@ func (cfg *Gateway) Validate() error {
 	}
 	if cfg.TrafficPolicy == "" {
 		cfg.TrafficPolicy = DefaultSessionPoliciesFile
-	}
-	if cfg.IPRoutingPolicy == "" {
-		cfg.IPRoutingPolicy = DefaultIPRoutingPolicyFile
 	}
 	cfg.CtrlAddr = DefaultAddress(cfg.CtrlAddr, defaultCtrlPort)
 	cfg.DataAddr = DefaultAddress(cfg.DataAddr, defaultDataPort)

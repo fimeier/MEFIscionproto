@@ -1,0 +1,12 @@
+load("//acceptance/common:topogen.bzl", "topogen_test")
+
+topogen_test(
+    name = "test",
+    src = "test.py",
+    data = [
+        "testdata/hp_groups_as2_as5.yml",
+        "testdata/hp_groups_as3.yml",
+        "testdata/hp_groups_as4.yml",
+    ],
+    topo = "testdata/topology.topo",
+)

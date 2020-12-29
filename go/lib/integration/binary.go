@@ -28,15 +28,14 @@ import (
 	"time"
 
 	"github.com/scionproto/scion/go/lib/addr"
-	"github.com/scionproto/scion/go/lib/common"
 	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/snet"
 )
 
 const (
-	// SCIOND is a placeholder for the SCIOND server in the arguments.
-	SCIOND = "<SCIOND>"
+	// Daemon is a placeholder for the Daemon server in the arguments.
+	Daemon = "<SCIOND>"
 	// ServerPortReplace is a placeholder for the server port in the arguments.
 	ServerPortReplace = "<ServerPort>"
 	// SrcIAReplace is a placeholder for the source IA in the arguments.
@@ -114,11 +113,11 @@ func (bi *binaryIntegration) StartServer(ctx context.Context, dst *snet.UDPAddr)
 	args := replacePattern(DstIAReplace, dst.IA.String(), bi.serverArgs)
 	args = replacePattern(DstHostReplace, dst.Host.IP.String(), args)
 	if needSCIOND(args) {
-		sciond, err := GetSCIONDAddress(GenFile(SCIONDAddressesFile), dst.IA)
+		daemonAddr, err := GetSCIONDAddress(GenFile(DaemonAddressesFile), dst.IA)
 		if err != nil {
 			return nil, serrors.WrapStr("unable to determine SCION Daemon address", err)
 		}
-		args = replacePattern(SCIOND, sciond, args)
+		args = replacePattern(Daemon, daemonAddr, args)
 	}
 	r := exec.CommandContext(ctx, bi.cmd, args...)
 	log.Info(fmt.Sprintf("%v %v\n", bi.cmd, strings.Join(args, " ")))
@@ -164,13 +163,13 @@ func (bi *binaryIntegration) StartServer(ctx context.Context, dst *snet.UDPAddr)
 	}()
 
 	if err = r.Start(); err != nil {
-		return nil, common.NewBasicError("Failed to start server", err, "dst", dst.IA)
+		return nil, serrors.WrapStr("Failed to start server", err, "dst", dst.IA)
 	}
 	select {
 	case <-ready:
 		return r, err
 	case <-time.After(StartServerTimeout):
-		return nil, common.NewBasicError("Start server timed out", nil, "dst", dst.IA)
+		return nil, serrors.New("Start server timed out", "dst", dst.IA)
 	}
 }
 
@@ -183,15 +182,15 @@ func (bi *binaryIntegration) StartClient(ctx context.Context,
 	args = replacePattern(DstHostReplace, dst.Host.IP.String(), args)
 	args = replacePattern(ServerPortReplace, serverPorts[dst.IA], args)
 	if needSCIOND(args) {
-		sciond, err := GetSCIONDAddress(GenFile(SCIONDAddressesFile), src.IA)
+		daemonAddr, err := GetSCIONDAddress(GenFile(DaemonAddressesFile), src.IA)
 		if err != nil {
 			return nil, serrors.WrapStr("unable to determine SCION Daemon address", err)
 		}
-		args = replacePattern(SCIOND, sciond, args)
+		args = replacePattern(Daemon, daemonAddr, args)
 	}
 	r := &BinaryWaiter{
-		cmd:      exec.CommandContext(ctx, bi.cmd, args...),
-		waitDone: make(chan struct{}),
+		cmd:         exec.CommandContext(ctx, bi.cmd, args...),
+		logsWritten: make(chan struct{}),
 	}
 	log.Info(fmt.Sprintf("%v %v\n", bi.cmd, strings.Join(args, " ")))
 	r.cmd.Env = os.Environ()
@@ -208,12 +207,9 @@ func (bi *binaryIntegration) StartClient(ctx context.Context,
 
 	go func() {
 		defer log.HandlePanic()
+		defer close(r.logsWritten)
+		defer pr.Close()
 		bi.writeLog("client", clientID(src, dst), fmt.Sprintf("%s -> %s", src.IA, dst.IA), tpr)
-	}()
-	go func() {
-		defer log.HandlePanic()
-		<-r.waitDone
-		pr.Close()
 	}()
 	return r, r.cmd.Start()
 }
@@ -258,7 +254,7 @@ func (bi *binaryIntegration) writeLog(name, id, startInfo string, ep io.Reader) 
 
 func needSCIOND(args []string) bool {
 	for _, arg := range args {
-		if strings.Contains(arg, SCIOND) {
+		if strings.Contains(arg, Daemon) {
 			return true
 		}
 	}
@@ -271,15 +267,16 @@ func clientID(src, dst *snet.UDPAddr) string {
 
 // BinaryWaiter can be used to wait on completion of the process.
 type BinaryWaiter struct {
-	cmd      *exec.Cmd
-	waitDone chan struct{}
-	output   bytes.Buffer
+	cmd         *exec.Cmd
+	logsWritten chan struct{}
+	output      bytes.Buffer
 }
 
 // Wait waits for completion of the process.
 func (bw *BinaryWaiter) Wait() error {
-	defer close(bw.waitDone)
-	return bw.cmd.Wait()
+	err := bw.cmd.Wait()
+	<-bw.logsWritten
+	return err
 }
 
 // Output is the output of the process, only available after Wait is returnred.

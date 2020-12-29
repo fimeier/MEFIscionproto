@@ -64,7 +64,7 @@ func (o *Originator) Name() string {
 
 // Run originates core and downstream beacons.
 func (o *Originator) Run(ctx context.Context) {
-	o.Tick.now = time.Now()
+	o.Tick.SetNow(time.Now())
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() {
@@ -78,7 +78,7 @@ func (o *Originator) Run(ctx context.Context) {
 		o.originateBeacons(ctx, topology.Child)
 	}()
 	wg.Wait()
-	o.Tick.updateLast()
+	o.Tick.UpdateLast()
 }
 
 // originateBeacons creates and sends a beacon for each active interface of
@@ -97,12 +97,13 @@ func (o *Originator) originateBeacons(ctx context.Context, linkType topology.Lin
 		b := beaconOriginator{
 			Originator: o,
 			ifID:       ifid,
-			timestamp:  o.Tick.now,
+			timestamp:  o.Tick.Now(),
 			summary:    s,
 		}
 		go func() {
 			defer log.HandlePanic()
 			defer wg.Done()
+
 			if err := b.originateBeacon(ctx); err != nil {
 				logger.Info("Unable to originate on interface",
 					"egress_interface", b.ifID, "err", err)
@@ -115,7 +116,7 @@ func (o *Originator) originateBeacons(ctx context.Context, linkType topology.Lin
 
 // needBeacon returns a list of interfaces that need a beacon.
 func (o *Originator) needBeacon(active []common.IFIDType) []common.IFIDType {
-	if o.Tick.passed() {
+	if o.Tick.Passed() {
 		return active
 	}
 	stale := make([]common.IFIDType, 0, len(active))
@@ -124,7 +125,7 @@ func (o *Originator) needBeacon(active []common.IFIDType) []common.IFIDType {
 		if intf == nil {
 			continue
 		}
-		if o.Tick.now.Sub(intf.LastOriginate()) > o.Tick.period {
+		if o.Tick.Overdue(intf.LastOriginate()) {
 			stale = append(stale, ifid)
 		}
 	}
@@ -132,7 +133,7 @@ func (o *Originator) needBeacon(active []common.IFIDType) []common.IFIDType {
 }
 
 func (o *Originator) logSummary(logger log.Logger, s *summary, linkType topology.LinkType) {
-	if o.Tick.passed() {
+	if o.Tick.Passed() {
 		logger.Debug("Originated beacons",
 			"type", linkType.String(), "egress_interfaces", s.IfIds())
 		return
@@ -166,14 +167,22 @@ func (o *beaconOriginator) originateBeacon(ctx context.Context) error {
 		return serrors.WrapStr("creating beacon", err, "egress_interface", o.ifID)
 	}
 
+	rpcContext, cancelF := context.WithTimeout(ctx, DefaultRPCTimeout)
+	defer cancelF()
+
+	rpcStart := time.Now()
 	err = o.BeaconSender.Send(
-		ctx,
+		rpcContext,
 		bseg,
 		topoInfo.IA,
 		o.ifID,
 		topoInfo.InternalAddr,
 	)
 	if err != nil {
+		if rpcContext.Err() != nil {
+			err = serrors.WrapStr("timed out waiting for RPC to complete", err,
+				"waited_for", time.Since(rpcStart))
+		}
 		o.incrementMetrics(labels.WithResult(prom.ErrNetwork))
 		return serrors.WrapStr("sending beacon", err)
 	}
@@ -199,7 +208,7 @@ func (o *beaconOriginator) createBeacon(ctx context.Context) (*seg.PathSegment, 
 }
 
 func (o *beaconOriginator) onSuccess(intf *ifstate.Interface) {
-	intf.Originate(o.Tick.now)
+	intf.Originate(o.Tick.Now())
 	o.summary.AddIfid(o.ifID)
 	o.summary.Inc()
 }

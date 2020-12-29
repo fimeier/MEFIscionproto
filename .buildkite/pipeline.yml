@@ -4,8 +4,8 @@ steps:
     command:
       # create version files so that deb and rpm release targets work.
       - ./tools/package-version 0.1.0-citest
-      - bazel build --announce_rc //:all
-      - make -C docker prod debug test
+      - bazel build --verbose_failures --announce_rc //:all
+      - bazel run --verbose_failures //docker:prod //docker:test
     key: build
     retry:
       automatic:
@@ -29,6 +29,7 @@ steps:
   - label: "check generated"
     if: build.message !~ /\[doc\]/
     command:
+      - ./tools/licensechecker.py $(find go acceptance -type f -iname '*.go')
       - mkdir -p /tmp/test-artifacts
       - cp go.mod go.sum go_deps.bzl /tmp/test-artifacts/
       - make go_deps.bzl -B

@@ -16,9 +16,9 @@ package common
 
 import (
 	"fmt"
-)
 
-var _ Payload = (*RawBytes)(nil)
+	"github.com/scionproto/scion/go/lib/serrors"
+)
 
 type RawBytes []byte
 
@@ -30,13 +30,13 @@ func (r RawBytes) Len() int {
 	return len(r)
 }
 
-func (r RawBytes) Copy() (Payload, error) {
+func (r RawBytes) Copy() (RawBytes, error) {
 	return append(RawBytes{}, r...), nil
 }
 
 func (r RawBytes) WritePld(b RawBytes) (int, error) {
 	if len(b) < len(r) {
-		return 0, NewBasicError("Insufficient space", nil, "expected", len(r), "actual", len(b))
+		return 0, serrors.New("Insufficient space", "expected", len(r), "actual", len(b))
 	}
 	return copy(b, r), nil
 }

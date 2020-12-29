@@ -4,7 +4,7 @@ load("//:scion.bzl", "scion_go_binary")
 go_library(
     name = "go_default_library",
     srcs = [
-        "cs.go",
+        "main.go",
         "sample.go",
     ],
     importpath = "github.com/scionproto/scion/go/cs",
@@ -53,6 +53,7 @@ go_library(
         "//go/pkg/trust/grpc:go_default_library",
         "//go/pkg/trust/metrics:go_default_library",
         "//go/pkg/trust/renewal:go_default_library",
+        "@com_github_grpc_ecosystem_go_grpc_prometheus//:go_default_library",
         "@com_github_spf13_cobra//:go_default_library",
         "@in_gopkg_yaml_v2//:go_default_library",
         "@org_golang_google_grpc//:go_default_library",

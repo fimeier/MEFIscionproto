@@ -15,12 +15,23 @@
 package dataplane
 
 import (
+	"encoding/binary"
 	"fmt"
+	"hash/crc64"
 	"net"
+	"sort"
+	"strings"
 	"sync"
+
+	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 
 	"github.com/scionproto/scion/go/lib/metrics"
 	"github.com/scionproto/scion/go/lib/snet"
+)
+
+var (
+	crcTable = crc64.MakeTable(crc64.ECMA)
 )
 
 type PathStatsPublisher interface {
@@ -50,38 +61,48 @@ type Session struct {
 	Metrics            SessionMetrics
 
 	mutex sync.Mutex
-	// sender is the currently used sender. If there's no available path, it is nil.
-	sender *sender
-	// path is the path used by current sender.
-	path snet.Path
+	// senders is a list of currently used senders.
+	senders []*sender
 }
 
 // Close signals that the session should close up its internal Connections. Close returns as
 // soon as forwarding goroutines are signaled to shut down (never blocks).
 func (s *Session) Close() {
-	if s.sender != nil {
-		s.sender.Close()
+	for _, snd := range s.senders {
+		snd.Close()
 	}
 }
 
 // Write encodes the packet and sends it to the network.
 // The packet may be silently dropped.
-func (s *Session) Write(pkt []byte) {
+func (s *Session) Write(packet gopacket.Packet) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	if s.sender == nil {
+
+	if len(s.senders) == 0 {
 		return
 	}
-	s.sender.Write(pkt)
+	if len(s.senders) == 1 {
+		s.senders[0].Write(packet.Data())
+		return
+	}
+	// Choose the path based on the packet's quintuple.
+	hash := crc64.Checksum(extractQuintuple(packet), crcTable)
+	index := hash % uint64(len(s.senders))
+	s.senders[index].Write(packet.Data())
 }
 
 func (s *Session) String() string {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	return fmt.Sprintf("{ID: %d, path: %s}", s.SessionID, s.path)
+	res := fmt.Sprintf("ID: %d", s.SessionID)
+	for _, snd := range s.senders {
+		res += fmt.Sprintf("\n    %v", snd.path)
+	}
+	return res
 }
 
-// SetPath sets the path for subsequent packets encapsulated by the session.
+// SetPaths sets the paths for subsequent packets encapsulated by the session.
 // Packets that were written up to this point will still be sent via the old
 // path. There are two reasons for that:
 //
@@ -92,29 +113,35 @@ func (s *Session) String() string {
 // could cause packets to be delivered out of order. Using new sender with new stream
 // ID causes creation of new reassemby queue on the remote side, thus avoiding the
 // reordering issues.
-func (s *Session) SetPath(path snet.Path) error {
+func (s *Session) SetPaths(paths []snet.Path) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
-	// If path hasn't changed do nothing.
-	if pathsEqual(s.path, path) {
-		return nil
+
+	var senders []*sender
+Top:
+	for _, path := range paths {
+		// Find out whether we already have a sender for this path.
+		// Keep using old senders whenever possible.
+		for _, oldSender := range s.senders {
+			if pathsEqual(path, oldSender.path) {
+				senders = append(senders, oldSender)
+				continue Top
+			}
+		}
+		newSender, err := newSender(s.SessionID, s.DataPlaneConn, path,
+			s.GatewayAddr, s.PathStatsPublisher, s.Metrics)
+		if err != nil {
+			return err
+		}
+		senders = append(senders, newSender)
 	}
-	s.path = path
-	// Close the old connection. (Buffered frames will still be sent out.)
-	if s.sender != nil {
-		s.sender.Close()
-		s.sender = nil
-	}
-	// If there's no path do nothing. Packets will be silently dropped.
-	if path == nil {
-		return nil
-	}
-	var err error
-	s.sender, err = newSender(s.SessionID, s.DataPlaneConn, s.path, s.GatewayAddr,
-		s.PathStatsPublisher, s.Metrics)
-	if err != nil {
-		return err
-	}
+	// Sort the paths to get a minimal amount of consistency,
+	// at least in the case when new paths are the same as old paths.
+	sort.Slice(senders, func(x, y int) bool {
+		return strings.Compare(string(senders[x].pathFingerprint),
+			string(senders[y].pathFingerprint)) == -1
+	})
+	s.senders = senders
 	return nil
 }
 
@@ -129,4 +156,40 @@ func pathsEqual(x, y snet.Path) bool {
 		x.Metadata() != nil && y.Metadata() != nil &&
 		x.Metadata().MTU == y.Metadata().MTU &&
 		x.Metadata().Expiry.Equal(y.Metadata().Expiry)
+}
+
+func extractQuintuple(packet gopacket.Packet) []byte {
+	// Protocol number and addresses.
+	var proto layers.IPProtocol
+	var q []byte
+	switch ip := packet.NetworkLayer().(type) {
+	case *layers.IPv4:
+		q = []byte{byte(ip.Protocol)}
+		q = append(q, ip.SrcIP...)
+		q = append(q, ip.DstIP...)
+		proto = ip.Protocol
+	case *layers.IPv6:
+		q = []byte{byte(ip.NextHeader)}
+		q = append(q, ip.SrcIP...)
+		q = append(q, ip.DstIP...)
+		proto = ip.NextHeader
+	default:
+		panic(fmt.Sprintf("unexpected network layer %T", packet.NetworkLayer()))
+	}
+	// Ports.
+	switch proto {
+	case layers.IPProtocolTCP:
+		pos := len(q)
+		q = append(q, 0, 0, 0, 0)
+		tcp := packet.Layer(layers.LayerTypeTCP).(*layers.TCP)
+		binary.BigEndian.PutUint16(q[pos:pos+2], uint16(tcp.SrcPort))
+		binary.BigEndian.PutUint16(q[pos+2:pos+4], uint16(tcp.DstPort))
+	case layers.IPProtocolUDP:
+		pos := len(q)
+		q = append(q, 0, 0, 0, 0)
+		udp := packet.Layer(layers.LayerTypeUDP).(*layers.UDP)
+		binary.BigEndian.PutUint16(q[pos:pos+2], uint16(udp.SrcPort))
+		binary.BigEndian.PutUint16(q[pos+2:pos+4], uint16(udp.DstPort))
+	}
+	return q
 }

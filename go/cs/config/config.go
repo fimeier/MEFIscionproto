@@ -27,6 +27,7 @@ import (
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/util"
 	"github.com/scionproto/scion/go/pkg/storage"
+	trustengine "github.com/scionproto/scion/go/pkg/trust/config"
 )
 
 const (
@@ -68,19 +69,20 @@ var _ config.Config = (*Config)(nil)
 
 // Config is the control server configuration.
 type Config struct {
-	General   env.General      `toml:"general,omitempty"`
-	Features  env.Features     `toml:"features,omitempty"`
-	Logging   log.Config       `toml:"log,omitempty"`
-	Metrics   env.Metrics      `toml:"metrics,omitempty"`
-	Tracing   env.Tracing      `toml:"tracing,omitempty"`
-	QUIC      env.QUIC         `toml:"quic,omitempty"`
-	BeaconDB  storage.DBConfig `toml:"beacon_db,omitempty"`
-	TrustDB   storage.DBConfig `toml:"trust_db,omitempty"`
-	RenewalDB storage.DBConfig `toml:"renewal_db,omitempty"`
-	PathDB    storage.DBConfig `toml:"path_db,omitempty"`
-	BS        BSConfig         `toml:"beaconing,omitempty"`
-	PS        PSConfig         `toml:"path,omitempty"`
-	CA        CA               `toml:"ca,omitempty"`
+	General     env.General        `toml:"general,omitempty"`
+	Features    env.Features       `toml:"features,omitempty"`
+	Logging     log.Config         `toml:"log,omitempty"`
+	Metrics     env.Metrics        `toml:"metrics,omitempty"`
+	Tracing     env.Tracing        `toml:"tracing,omitempty"`
+	QUIC        env.QUIC           `toml:"quic,omitempty"`
+	BeaconDB    storage.DBConfig   `toml:"beacon_db,omitempty"`
+	TrustDB     storage.DBConfig   `toml:"trust_db,omitempty"`
+	RenewalDB   storage.DBConfig   `toml:"renewal_db,omitempty"`
+	PathDB      storage.DBConfig   `toml:"path_db,omitempty"`
+	BS          BSConfig           `toml:"beaconing,omitempty"`
+	PS          PSConfig           `toml:"path,omitempty"`
+	CA          CA                 `toml:"ca,omitempty"`
+	TrustEngine trustengine.Config `toml:"trustengine,omitempty"`
 }
 
 // InitDefaults initializes the default values for all parts of the config.
@@ -98,6 +100,7 @@ func (cfg *Config) InitDefaults() {
 		&cfg.BS,
 		&cfg.PS,
 		&cfg.CA,
+		&cfg.TrustEngine,
 	)
 }
 
@@ -115,6 +118,7 @@ func (cfg *Config) Validate() error {
 		&cfg.BS,
 		&cfg.PS,
 		&cfg.CA,
+		&cfg.TrustEngine,
 	)
 }
 
@@ -158,6 +162,7 @@ func (cfg *Config) Sample(dst io.Writer, path config.Path, _ config.CtxMap) {
 		&cfg.BS,
 		&cfg.PS,
 		&cfg.CA,
+		&cfg.TrustEngine,
 	)
 }
 
@@ -216,7 +221,7 @@ func (cfg *BSConfig) Validate() error {
 		initDurWrap(&cfg.RevTTL, DefaultRevTTL)
 	}
 	if cfg.RevTTL.Duration < path_mgmt.MinRevTTL {
-		return common.NewBasicError("rev_ttl must be equal or greater than MinRevTTL", nil,
+		return serrors.New("rev_ttl must be equal or greater than MinRevTTL",
 			"MinRevTTL", path_mgmt.MinRevTTL)
 	}
 	if cfg.RevOverlap.Duration == 0 {
@@ -251,6 +256,10 @@ type PSConfig struct {
 	// QueryInterval specifies after how much time segments
 	// for a destination should be refetched.
 	QueryInterval util.DurWrap `toml:"query_interval,omitempty"`
+	// HiddenPathsCfg specifies the file name of the hidden path configuration.
+	// If HiddenPathsCfg begins with http:// or https://, it will be fetched
+	// over the network from the specified URL instead.
+	HiddenPathsCfg string `toml:"hidden_paths_cfg,omitempty"`
 }
 
 func (cfg *PSConfig) InitDefaults() {
@@ -295,10 +304,6 @@ type Policies struct {
 	// If this is the empty string, the default policy is used. In a core beacon
 	// server, this field is ignored.
 	DownRegistration string `toml:"down_registration,omitempty"`
-	// HiddenPathRegistration contains the file path for the hidden path registration policy
-	// and the corresponding hidden path groups.
-	// If this is the empty string, no hidden path functionality is used.
-	HiddenPathRegistration string `toml:"hidden_path_registration,omitempty"`
 }
 
 // Sample generates a sample for the beacon server specific configuration.

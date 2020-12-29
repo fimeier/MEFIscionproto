@@ -1,4 +1,16 @@
 // Copyright 2020 Anapaya Systems
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 package control_test
 
@@ -31,7 +43,7 @@ func TestSessionRun(t *testing.T) {
 		)
 
 		dataplaneSession := mock_control.NewMockDataplaneSession(ctrl)
-		dataplaneSession.EXPECT().SetPath(path)
+		dataplaneSession.EXPECT().SetPaths([]snet.Path{path})
 
 		events := make(chan control.SessionEvent)
 		sessionMonitorEvents := make(chan control.SessionEvent)
@@ -96,7 +108,7 @@ func TestSessionRun(t *testing.T) {
 			Paths: []snet.Path{path}}).MinTimes(2)
 
 		dataplaneSession := mock_control.NewMockDataplaneSession(ctrl)
-		dataplaneSession.EXPECT().SetPath(path).MinTimes(2)
+		dataplaneSession.EXPECT().SetPaths([]snet.Path{path}).MinTimes(2)
 
 		events := make(chan control.SessionEvent)
 		sessionMonitorEvents := make(chan control.SessionEvent)

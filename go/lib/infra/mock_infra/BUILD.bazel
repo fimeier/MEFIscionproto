@@ -4,11 +4,7 @@ load("@com_github_jmhodges_bazel_gomock//:gomock.bzl", "gomock")
 gomock(
     name = "go_default_mock",
     out = "mock.go",
-    interfaces = [
-        "ResponseWriter",
-        "Verifier",
-        "Handler",
-    ],
+    interfaces = ["Verifier"],
     library = "//go/lib/infra:go_default_library",
     package = "mock_infra",
 )
@@ -20,8 +16,6 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//go/lib/addr:go_default_library",
-        "//go/lib/ctrl/ack:go_default_library",
-        "//go/lib/ctrl/path_mgmt:go_default_library",
         "//go/lib/infra:go_default_library",
         "//go/lib/scrypto/signed:go_default_library",
         "//go/pkg/proto/crypto:go_default_library",

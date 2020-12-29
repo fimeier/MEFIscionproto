@@ -52,7 +52,7 @@ type SegmentProvider interface {
 
 // SegmentStore stores segments in the path database.
 type SegmentStore interface {
-	StoreSegs(context.Context, []*seghandler.SegWithHP) (seghandler.SegStats, error)
+	StoreSegs(context.Context, []*seg.Meta) (seghandler.SegStats, error)
 }
 
 // RPC registers the path segment with the remote.
@@ -109,15 +109,15 @@ func (r *WriteScheduler) Name() string {
 
 // Run writes path segments using the configured writer.
 func (r *WriteScheduler) Run(ctx context.Context) {
-	r.Tick.now = time.Now()
+	r.Tick.SetNow(time.Now())
 	if err := r.run(ctx); err != nil {
 		log.FromCtx(ctx).Error("Unable to register", "seg_type", r.Type, "err", err)
 	}
-	r.Tick.updateLast()
+	r.Tick.UpdateLast()
 }
 
 func (r *WriteScheduler) run(ctx context.Context) error {
-	if r.Tick.now.Sub(r.lastWrite) < r.Tick.period && !r.Tick.passed() {
+	if r.Tick.Now().Sub(r.lastWrite) < r.Tick.Period() && !r.Tick.Passed() {
 		return nil
 	}
 	segments, err := r.Provider.SegmentsToRegister(ctx, r.Type)
@@ -129,10 +129,10 @@ func (r *WriteScheduler) run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	r.lastWrite = r.Tick.now
+	r.lastWrite = r.Tick.Now()
 	r.logSummary(log.FromCtx(ctx), &summary{count: stats.Count, srcs: stats.StartIAs})
 	if stats.Count > 0 {
-		r.lastWrite = r.Tick.now
+		r.lastWrite = r.Tick.Now()
 	}
 	return err
 }
@@ -225,7 +225,7 @@ func (r *LocalWriter) Write(ctx context.Context, segments <-chan beacon.BeaconOr
 
 	logger := log.FromCtx(ctx)
 	beacons := make(map[string]beacon.Beacon)
-	var toRegister []*seghandler.SegWithHP
+	var toRegister []*seg.Meta
 	for bOrErr := range segments {
 		if bOrErr.Err != nil {
 			logger.Error("Unable to get beacon", "err", bOrErr.Err)
@@ -241,9 +241,7 @@ func (r *LocalWriter) Write(ctx context.Context, segments <-chan beacon.BeaconOr
 			metrics.CounterInc(r.InternalErrors)
 			continue
 		}
-		toRegister = append(toRegister, &seghandler.SegWithHP{
-			Seg: &seg.Meta{Type: r.Type, Segment: bOrErr.Beacon.Segment},
-		})
+		toRegister = append(toRegister, &seg.Meta{Type: r.Type, Segment: bOrErr.Beacon.Segment})
 		beacons[bOrErr.Beacon.Segment.GetLoggingID()] = bOrErr.Beacon
 	}
 	if len(toRegister) == 0 {
@@ -260,7 +258,7 @@ func (r *LocalWriter) Write(ctx context.Context, segments <-chan beacon.BeaconOr
 }
 
 func (r *WriteScheduler) logSummary(logger log.Logger, s *summary) {
-	if r.Tick.passed() {
+	if r.Tick.Passed() {
 		logger.Debug("Registered beacons", "seg_type", r.Type, "count", s.count,
 			"start_isd_ases", len(s.srcs))
 		return

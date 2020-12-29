@@ -16,7 +16,6 @@ package hiddenpath
 
 import (
 	"fmt"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -24,6 +23,7 @@ import (
 	"gopkg.in/yaml.v2"
 
 	"github.com/scionproto/scion/go/lib/addr"
+	"github.com/scionproto/scion/go/lib/config"
 	"github.com/scionproto/scion/go/lib/serrors"
 )
 
@@ -124,6 +124,19 @@ func (g *Group) GetRegistries() []addr.IA {
 	return ret
 }
 
+// Roles indicates roles in a hidden path group(s).
+type Roles struct {
+	Owner    bool
+	Registry bool
+	Reader   bool
+	Writer   bool
+}
+
+// None returns true if no role is set.
+func (r Roles) None() bool {
+	return !r.Owner && !r.Registry && !r.Reader && !r.Writer
+}
+
 // Groups is a list of hidden path groups.
 type Groups map[GroupID]*Group
 
@@ -164,23 +177,39 @@ func (g Groups) MarshalYAML() (interface{}, error) {
 }
 
 // LoadHiddenPathGroups loads the hiddenpath groups configuration file.
-func LoadHiddenPathGroups(file string) (Groups, error) {
+func LoadHiddenPathGroups(location string) (Groups, error) {
 	ret := make(Groups)
-	if file == "" {
+	if location == "" {
 		return nil, nil
 	}
-	f, err := os.Open(file)
+	c, err := config.LoadResource(location)
 	if err != nil {
-		return nil, serrors.WrapStr("opening file", err)
+		return nil, serrors.WithCtx(err, "location", location)
 	}
-	defer f.Close()
-	if err := yaml.NewDecoder(f).Decode(&ret); err != nil {
-		return nil, serrors.WrapStr("parsing file", err, "file", file)
+	defer c.Close()
+	if err := yaml.NewDecoder(c).Decode(&ret); err != nil {
+		return nil, serrors.WrapStr("parsing", err, "location", location)
 	}
 	if err := ret.Validate(); err != nil {
-		return nil, serrors.WrapStr("validating", err, "file", f)
+		return nil, serrors.WrapStr("validating", err, "file", c)
 	}
 	return ret, nil
+}
+
+// Roles returns the roles the given ISD-AS has in this set of groups.
+func (g Groups) Roles(ia addr.IA) Roles {
+	r := Roles{}
+	inSet := func(ia addr.IA, set map[addr.IA]struct{}) bool {
+		_, ok := set[ia]
+		return ok
+	}
+	for _, group := range g {
+		r.Owner = r.Owner || ia.Equal(group.Owner)
+		r.Registry = r.Registry || inSet(ia, group.Registries)
+		r.Reader = r.Reader || inSet(ia, group.Readers)
+		r.Writer = r.Writer || inSet(ia, group.Writers)
+	}
+	return r
 }
 
 type groupInfo struct {

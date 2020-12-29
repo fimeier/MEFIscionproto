@@ -1,3 +1,17 @@
+// Copyright 2020 Anapaya Systems
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//   http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package dispatcher
 
 import (
@@ -201,7 +215,7 @@ func openConn(network, address string, p SocketMetaHandler) (net.PacketConn, err
 	}
 	listeningAddress, err := net.ResolveUDPAddr(network, address)
 	if err != nil {
-		return nil, common.NewBasicError("unable to construct UDP addr", err)
+		return nil, serrors.WrapStr("unable to construct UDP addr", err)
 	}
 	if network == "udp4" && listeningAddress.IP == nil {
 		listeningAddress.IP = net.IPv4zero
@@ -212,7 +226,7 @@ func openConn(network, address string, p SocketMetaHandler) (net.PacketConn, err
 
 	c, err := conn.New(listeningAddress, nil, &conn.Config{ReceiveBufferSize: ReceiveBufferSize})
 	if err != nil {
-		return nil, common.NewBasicError("unable to open conn", err)
+		return nil, serrors.WrapStr("unable to open conn", err)
 	}
 
 	return &underlayConnWrapper{Conn: c, Handler: p}, nil
@@ -258,7 +272,7 @@ func (o *underlayConnWrapper) ReadFrom(p []byte) (int, net.Addr, error) {
 func (o *underlayConnWrapper) WriteTo(p []byte, a net.Addr) (int, error) {
 	udpAddr, ok := a.(*net.UDPAddr)
 	if !ok {
-		return 0, common.NewBasicError("address is not UDP", nil, "addr", a)
+		return 0, serrors.New("address is not UDP", "addr", a)
 	}
 	return o.Conn.WriteTo(common.RawBytes(p), udpAddr)
 }
