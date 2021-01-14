@@ -15,7 +15,9 @@
 package snet
 
 import (
+	"encoding/binary"
 	"net"
+	"syscall"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
@@ -310,6 +312,29 @@ func (p *Packet) Decode() error {
 			DstPort: uint16(udpLayer.DstPort),
 			Payload: udpLayer.Payload,
 		}
+		//the size of the buffer - Payload are the "missing bytes" after the udp packet
+		scionLayerPayloadLen := len(scionLayer.Payload)
+		if scionLayerPayloadLen == int(scionLayer.PayloadLen+4*8) {
+			//trying to get some TS's out of the packet
+			//having access to connection settings (TsMode) would this make easier
+			//anyway: The additional data is ignored, but returned as part of the buffer pack to the application
+			//maybe a problem.... remove the additional data for backward compatibility
+
+			p.KernelTS = syscall.Timespec{
+				Sec:  int64(binary.LittleEndian.Uint64(scionLayer.Payload[scionLayer.PayloadLen:])),
+				Nsec: int64(binary.LittleEndian.Uint64(scionLayer.Payload[scionLayer.PayloadLen+8:])),
+			}
+
+			p.HwTS = syscall.Timespec{
+				Sec:  int64(binary.LittleEndian.Uint64(scionLayer.Payload[scionLayer.PayloadLen+16:])),
+				Nsec: int64(binary.LittleEndian.Uint64(scionLayer.Payload[scionLayer.PayloadLen+24:])),
+			}
+
+			//TODO: Decide if this is needed.
+			//if someone is using the received data directly, with this fix, there is no difference compared to before ScionTime
+			p.Bytes = p.Bytes[:len(p.Bytes)-4*8]
+
+		}
 	case slayers.LayerTypeSCMP:
 		gpkt := gopacket.NewPacket(scmpLayer.Payload, scmpLayer.NextLayerType(),
 			gopacket.DecodeOptions{})
@@ -499,6 +524,14 @@ type PacketInfo struct {
 	Path spath.Path
 	// Payload is the Payload of the message.
 	Payload Payload
+	// KernelTS contains a kernel timestamp
+	//
+	// Contains garbage if not enabled by application
+	KernelTS syscall.Timespec
+	// HwTS contains a hardware timestamp
+	//
+	// Contains garbage if not enabled by application
+	HwTS syscall.Timespec
 }
 
 func netAddrToHostAddr(a net.Addr) (addr.HostAddr, error) {

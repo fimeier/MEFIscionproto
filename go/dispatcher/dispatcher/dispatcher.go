@@ -16,6 +16,7 @@ package dispatcher
 
 import (
 	"context"
+	"encoding/binary"
 	"net"
 	"sync"
 	"time"
@@ -135,6 +136,8 @@ type Conn struct {
 	ring *ringbuf.Ring
 	// regReference is the reference to the registration in the routing table.
 	regReference registration.RegReference
+	// TsMode contains informations about activated socket options for timestamps (sciontime)
+	TsMode int
 }
 
 func (ac *Conn) WriteTo(p []byte, addr net.Addr) (int, error) {
@@ -265,7 +268,27 @@ func (o *underlayConnWrapper) ReadFrom(p []byte) (int, net.Addr, error) {
 	if meta == nil {
 		return n, nil, err
 	}
-	o.Handler.Handle(meta)
+
+	/*
+		fmt.Printf("meta.KernelTS.Sec===%v\n", meta.KernelTS.Sec)
+		fmt.Printf("meta.KernelTS.Nsec===%v\n", meta.KernelTS.Nsec)
+
+		fmt.Printf("meta.HwTS.Sec===%v\n", meta.HwTS.Sec)
+		fmt.Printf("meta.HwTS.Nsec===%v\n", meta.HwTS.Nsec)
+	*/
+	// Ugly Hack to return meta data (Timestamps) without changing to much in the appliactions logic
+	// Hint: p.Len() == p.Cap() => we do not need to call append
+	// Hint2: n is not changed. In the worst case, an (unaware) callee will receive additional data, but should ignore them
+	// TODO: Add failsafe n+32 < p.Cap()
+	binary.LittleEndian.PutUint64(p[n:], uint64(meta.KernelTS.Sec))
+	binary.LittleEndian.PutUint64(p[n+8:], uint64(meta.KernelTS.Nsec))
+
+	binary.LittleEndian.PutUint64(p[n+16:], uint64(meta.HwTS.Sec))
+	binary.LittleEndian.PutUint64(p[n+24:], uint64(meta.HwTS.Nsec))
+
+	// TODO: Use the interface data and ip data for something useful
+	// meta.......
+
 	return n, meta.Src, err
 }
 

@@ -65,6 +65,12 @@ type AppConnHandler struct {
 	Conn     net.PacketConn
 	DispConn *dispatcher.Conn
 	Logger   log.Logger
+	// TsMode contains informations about activated socket options for timestamps (sciontime)
+	//
+	// Remark: The value is stored at different levels (Conn, DispConn,...).
+	// Once it is clear where it is needed, it can be placed at the appropriate place, given that it
+	// is also accessible by the given interface (not always the case)
+	TsMode int
 }
 
 func (h *AppConnHandler) Handle(appServer *dispatcher.Server) {
@@ -83,6 +89,8 @@ func (h *AppConnHandler) Handle(appServer *dispatcher.Server) {
 	svc := h.DispConn.SVCAddr().String()
 	metrics.M.OpenSockets(metrics.SVC{Type: svc}).Inc()
 	defer metrics.M.OpenSockets(metrics.SVC{Type: svc}).Dec()
+
+	h.Conn.(*reliable.Conn).TsMode = h.TsMode
 
 	go func() {
 		defer log.HandlePanic()
@@ -104,11 +112,35 @@ func (h *AppConnHandler) doRegExchange(appServer *dispatcher.Server) (net.Packet
 	if err != nil {
 		return nil, serrors.New("registration message error", "err", err)
 	}
+
+	//HINT: Code-Snippted here and below could also go into appServer.Register()<-the call below, the next one
+	/* Get the TsMode out of the regInfo.SVCAddress field
+	This is an ugly, but very usful hack to introduce timestamping socket options to the scion api, without
+	changing a lot.
+	Limitation: Activation of TsMode is only possible, if for the service "addr.SvcNone"
+
+	could become a switch... depends on how the infos are use (activation of the options)
+	*/
+	if (regInfo.SVCAddress == addr.RxKernel) ||
+		regInfo.SVCAddress == addr.RxKernelHw ||
+		regInfo.SVCAddress == addr.TxKernelRxKernel ||
+		regInfo.SVCAddress == addr.TxKernelHwRxKernelHw {
+
+		regInfo.TsMode = int(regInfo.SVCAddress)
+		h.TsMode = int(regInfo.SVCAddress)
+
+		//Set SCVAddress Back to default
+		regInfo.SVCAddress = addr.SvcNone
+	}
+
 	appConn, _, err := appServer.Register(nil,
 		regInfo.IA, regInfo.PublicAddress, regInfo.SVCAddress)
 	if err != nil {
 		return nil, serrors.New("registration table error", "err", err)
 	}
+
+	appConn.(*dispatcher.Conn).TsMode = regInfo.TsMode
+
 	udpAddr := appConn.(*dispatcher.Conn).LocalAddr().(*net.UDPAddr)
 	port := uint16(udpAddr.Port)
 	if err := h.sendConfirmation(b, &reliable.Confirmation{Port: port}); err != nil {

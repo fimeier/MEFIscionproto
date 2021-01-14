@@ -24,7 +24,7 @@ import (
 
 // UnderlayPacket contains metadata about a SCION packet going through the
 // reliable socket framing protocol.
-type UnderlayPacket struct {
+type UnderlayPacket struct { //contains also the data, not only metadata
 	Address *net.UDPAddr
 	Payload []byte
 }

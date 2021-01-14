@@ -74,6 +74,20 @@ const (
 	SvcNone     HostSVC = 0xffff
 
 	SVCMcast HostSVC = 0x8000
+
+	/*
+		Flags for ScionTime
+		IFF Hw is available => Kernel && Hw
+		If it is a client => Tx && Rx
+		If it is a server and xleave is active for this client => Tx && Rx
+		If it is a normal server => Rx
+
+		=> Assuming NTP-like application: a client will at least ask for Rx-Kernel Timestamps, iff Timestamps are needed
+	*/
+	RxKernel             HostSVC = 0xaaa0
+	RxKernelHw           HostSVC = 0xaaa1
+	TxKernelRxKernel     HostSVC = 0xaaa2
+	TxKernelHwRxKernelHw HostSVC = 0xaaa3
 )
 
 type HostAddr interface {

@@ -15,8 +15,11 @@
 package respool
 
 import (
+	"encoding/binary"
+	"fmt"
 	"net"
 	"sync"
+	"syscall"
 
 	"github.com/google/gopacket"
 
@@ -24,6 +27,7 @@ import (
 	"github.com/scionproto/scion/go/lib/common"
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/slayers"
+	"github.com/scionproto/scion/go/lib/sock/reliable"
 )
 
 var packetPool = sync.Pool{
@@ -60,6 +64,11 @@ type Packet struct {
 
 	mtx      sync.Mutex
 	refCount *int
+
+	// KernelTS contains a kernel timestamp
+	KernelTS syscall.Timespec
+	// HwTS contains a hardware timestamp
+	HwTS syscall.Timespec
 }
 
 // Len returns the length of the packet.
@@ -126,6 +135,25 @@ func (pkt *Packet) DecodeFromConn(conn net.PacketConn) error {
 	if err != nil {
 		return err
 	}
+	// Ugly Hack to receive meta data (Timestamps) without changing to much in the appliactions logic
+	// Hint: n has NOT been changed.
+	// TODO: Add failsafe n+32 < p.Cap()
+	// TODO2: Use the interface data and ip data for something useful (get them from ReadFrom call)
+	// TODO3: Would like to pass pkt into ReadFrom (solve meta data problem), but this seems to be impossible given the current Interface
+	pkt.KernelTS = syscall.Timespec{
+		Sec:  int64(binary.LittleEndian.Uint64(pkt.buffer[n:])),
+		Nsec: int64(binary.LittleEndian.Uint64(pkt.buffer[n+8:])),
+	}
+
+	pkt.HwTS = syscall.Timespec{
+		Sec:  int64(binary.LittleEndian.Uint64(pkt.buffer[n+16:])),
+		Nsec: int64(binary.LittleEndian.Uint64(pkt.buffer[n+24:])),
+	}
+	/*
+		fmt.Printf("pkt.KernelTS=%v\n", pkt.KernelTS)
+		fmt.Printf("pkt.HwTS=%v\n", pkt.HwTS)
+	*/
+
 	pkt.buffer = pkt.buffer[:n]
 	metrics.M.NetReadBytes().Add(float64(n))
 
@@ -173,8 +201,40 @@ func (pkt *Packet) decodeBuffer() error {
 	return nil
 }
 
+/* Wird aufgerufen von app_socket::RunRingToAppDataplane==interner Ring nach App Unix-Socket verschieben
+und ebenso von RunAppToNetDataplane()==App Unix-Socket nach "Lan"*/
 func (pkt *Packet) SendOnConn(conn net.PacketConn, address net.Addr) (int, error) {
-	return conn.WriteTo(pkt.buffer, address)
+	/*
+		ASSUMPTION:
+		Manipulation of pkt.buffer is enough, i.e. just add the data.
+	*/
+
+	/*
+		Man könnte TS's auch durch Anpassung SerializeTo//framing protocol übermitteln
+		Dies würde jedoch mehr Änderungen nötig machen.
+		Ebenso scheint es ok zu seine alle 4-Teile der TS zu übermitteln,
+		da alles lokal übermittelt wird
+	*/
+
+	switch conn.(type) {
+	case *reliable.Conn:
+		if conn.(*reliable.Conn).TsMode != 0 {
+			/* TODO: Add the real modes and decide what to do
+			For easier logic: always add all timestamps => client receives additional 32 bytes,
+			in any case
+			*/
+			fmt.Printf("conn.(*reliable.Conn).TsMode=%v WE NEED TO ADD A TIMESTAMP\n", conn.(*reliable.Conn).TsMode)
+			buffLen := pkt.buffer.Len()
+			pkt.buffer = pkt.buffer[:buffLen+32]
+			binary.LittleEndian.PutUint64(pkt.buffer[buffLen:], uint64(pkt.KernelTS.Sec))
+			binary.LittleEndian.PutUint64(pkt.buffer[buffLen+8:], uint64(pkt.KernelTS.Nsec))
+			binary.LittleEndian.PutUint64(pkt.buffer[buffLen+16:], uint64(pkt.HwTS.Sec))
+			binary.LittleEndian.PutUint64(pkt.buffer[buffLen+24:], uint64(pkt.HwTS.Nsec))
+		}
+	default:
+	}
+
+	return conn.WriteTo(pkt.buffer, address) //address ist LastHopUnderlay (für interner RIng nach Unix-Socket) und d.h. letzter Node VOR Dispatcher
 }
 
 func (pkt *Packet) reset() {

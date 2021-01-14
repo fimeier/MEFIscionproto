@@ -36,6 +36,8 @@ type Registration struct {
 	PublicAddress *net.UDPAddr
 	BindAddress   *net.UDPAddr
 	SVCAddress    addr.HostSVC
+	// TsMode contains informations about activated socket options for timestamps (sciontime)
+	TsMode int
 }
 
 func (r *Registration) SerializeTo(b []byte) (int, error) {

@@ -130,6 +130,9 @@ type Conn struct {
 	writeMutex    sync.Mutex
 	writeBuffer   []byte
 	writeStreamer *WriteStreamer
+
+	// TsMode contains informations about activated socket options for timestamps (sciontime)
+	TsMode int
 }
 
 func newConn(c net.Conn) *Conn {

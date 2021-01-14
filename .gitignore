@@ -19,6 +19,7 @@ Thumbs.db
 /gen-data/
 /gen-certs/
 /traces/
+/gen-cacheBACKUP/
 
 # Python generated files #
 #########################
