@@ -268,6 +268,7 @@ func (o *underlayConnWrapper) ReadFrom(p []byte) (int, net.Addr, error) {
 	if meta == nil {
 		return n, nil, err
 	}
+	o.Handler.Handle(meta)
 
 	/*
 		fmt.Printf("meta.KernelTS.Sec===%v\n", meta.KernelTS.Sec)

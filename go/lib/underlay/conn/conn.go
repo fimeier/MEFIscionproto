@@ -489,7 +489,7 @@ type ReadMeta struct {
 	Ipi syscall.Inet4Pktinfo
 }
 
-func (m *ReadMeta) reset() { //mefi84 add more ts stuff here?
+func (m *ReadMeta) reset() {
 	m.Src = nil
 	m.RcvOvfl = 0
 	m.Recvd = time.Unix(0, 0)
