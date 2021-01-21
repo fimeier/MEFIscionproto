@@ -24,6 +24,7 @@ import (
 
 	"github.com/scionproto/scion/go/dispatcher/config"
 	"github.com/scionproto/scion/go/dispatcher/network"
+	"github.com/scionproto/scion/go/lib/common"
 	libconfig "github.com/scionproto/scion/go/lib/config"
 	"github.com/scionproto/scion/go/lib/env"
 	"github.com/scionproto/scion/go/lib/fatal"
@@ -76,6 +77,13 @@ func realMain() int {
 			cfg.Dispatcher.ApplicationSocket,
 			os.FileMode(cfg.Dispatcher.SocketFileMode),
 			cfg.Dispatcher.UnderlayPort,
+			common.TimestampOptions{
+				EnableTimestampRX:   cfg.Dispatcher.TimestampRX,
+				EnableTimestampTX:   cfg.Dispatcher.TimestampTX,
+				HwTimestampDevice:   cfg.Dispatcher.HwTimestamp,
+				EnableTimestampUdp6: false, //cfg.Dispatcher.EnableTimestampUdp6, hardcoded as it is not (fully) implemented yet
+				ErrQueueChanCap:     cfg.Dispatcher.ErrQueueChanCap,
+			},
 		)
 		if err != nil {
 			fatal.Fatal(err)
@@ -128,7 +136,7 @@ func setupBasic() error {
 }
 
 func RunDispatcher(deleteSocketFlag bool, applicationSocket string, socketFileMode os.FileMode,
-	underlayPort int) error {
+	underlayPort int, tsOpt common.TimestampOptions) error {
 
 	if deleteSocketFlag {
 		if err := deleteSocket(cfg.Dispatcher.ApplicationSocket); err != nil {
@@ -139,6 +147,7 @@ func RunDispatcher(deleteSocketFlag bool, applicationSocket string, socketFileMo
 		UnderlaySocket:    fmt.Sprintf(":%d", underlayPort),
 		ApplicationSocket: applicationSocket,
 		SocketFileMode:    socketFileMode,
+		TimestampOpt:      tsOpt,
 	}
 	log.Debug("Dispatcher starting", "appSocket", applicationSocket, "underlayPort", underlayPort)
 	return dispatcher.ListenAndServe()

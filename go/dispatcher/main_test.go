@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/scionproto/scion/go/lib/addr"
+	"github.com/scionproto/scion/go/lib/common"
 	"github.com/scionproto/scion/go/lib/snet"
 	"github.com/scionproto/scion/go/lib/sock/reliable"
 	"github.com/scionproto/scion/go/lib/xtest"
@@ -406,7 +407,8 @@ func TestDataplaneIntegration(t *testing.T) {
 
 	go func() {
 		err := RunDispatcher(false, settings.ApplicationSocket, reliable.DefaultDispSocketFileMode,
-			settings.UnderlayPort)
+			settings.UnderlayPort,
+			common.TimestampOptions{}) //should we add something useful
 		require.NoError(t, err, "dispatcher error")
 	}()
 	time.Sleep(defaultWaitDuration)

@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"time"
 
 	"github.com/scionproto/scion/go/dispatcher/dispatcher"
 	"github.com/scionproto/scion/go/dispatcher/internal/metrics"
@@ -65,14 +66,12 @@ type AppConnHandler struct {
 	Conn     net.PacketConn
 	DispConn *dispatcher.Conn
 	Logger   log.Logger
-	// TsMode contains informations about activated socket options for timestamps (sciontime)
-	//
-	// Remark: The value is stored at different levels (Conn, DispConn,...).
-	// Once it is clear where it is needed, it can be placed at the appropriate place, given that it
-	// is also accessible by the given interface (not always the case)
-	TsMode int
+	// AppConnHandler contains additional data to support timestamps
+	common.AppConnHandlerTSExtension
 }
 
+//TODO: Hier muss ich vermutlich unterscheiden auf welchen wegen der Client rausssendne willl
+//v4 vs vs4.... was dann aber erst beim weiterleiten klar ist...
 func (h *AppConnHandler) Handle(appServer *dispatcher.Server) {
 	h.Logger.Debug("Accepted new client")
 	defer h.Logger.Debug("Closed client socket")
@@ -90,13 +89,29 @@ func (h *AppConnHandler) Handle(appServer *dispatcher.Server) {
 	metrics.M.OpenSockets(metrics.SVC{Type: svc}).Inc()
 	defer metrics.M.OpenSockets(metrics.SVC{Type: svc}).Dec()
 
+	//packet.go::SendOnConn() will use this to add TS's to the incoming data buffer
+	//before the packets get forwarded to the application's ingress socket
+	//this "enables" Rx-Timestamps
 	h.Conn.(*reliable.Conn).TsMode = h.TsMode
+
+	if appServer.EnableTimestampTX {
+		//here we are only interesstend in Tx-Timestamps, as we use those infos to decide how we should
+		//send data from the application's socket to the (real) network
+		if h.TsMode == int(addr.TxKernelRxKernel) || h.TsMode == int(addr.TxKernelHwRxKernelHw) {
+			//AppConnHandler
+			h.Ipv4UnderlayFd = appServer.Ipv4UnderlayFd
+			h.Ipv6UnderlayFd = appServer.Ipv6UnderlayFd
+			h.Ipv4ErrQueueChan = appServer.Ipv4ErrQueueChan
+			h.Ipv6ErrQueueChan = appServer.Ipv6ErrQueueChan
+
+			h.Udpv4Conn = appServer.Udpv4Conn
+		}
+	}
 
 	go func() {
 		defer log.HandlePanic()
 		h.RunRingToAppDataplane()
 	}()
-
 	h.RunAppToNetDataplane()
 }
 
@@ -126,10 +141,32 @@ func (h *AppConnHandler) doRegExchange(appServer *dispatcher.Server) (net.Packet
 		regInfo.SVCAddress == addr.TxKernelRxKernel ||
 		regInfo.SVCAddress == addr.TxKernelHwRxKernelHw {
 
-		regInfo.TsMode = int(regInfo.SVCAddress)
-		h.TsMode = int(regInfo.SVCAddress)
+		//TODO Iff the client asks for something that is not supported decide what to do
+		//At the moment we just ignore it
+		//I guess we should let the client "crash"
+		//Ignoring Hw Timestamps is "ok"
 
-		//Set SCVAddress Back to default
+		//no limitations
+		if appServer.EnableTimestampRX && appServer.EnableTimestampTX {
+			regInfo.TsMode = int(regInfo.SVCAddress)
+			h.TsMode = int(regInfo.SVCAddress)
+		} else
+		//no TX Timestamps
+		if appServer.EnableTimestampRX && !appServer.EnableTimestampTX {
+			switch regInfo.SVCAddress {
+			case addr.TxKernelRxKernel:
+				regInfo.TsMode = int(addr.RxKernel)
+				h.TsMode = int(addr.RxKernel)
+			case addr.TxKernelHwRxKernelHw:
+				regInfo.TsMode = int(addr.RxKernelHw)
+				h.TsMode = int(addr.RxKernelHw)
+			}
+		}
+
+		//Set SCVAddress Back to it's default
+		//Hint: A client can only enable timestamps, if its service is equal to addr.SvcNone
+		//Compare the clients interface. As we do not change it, the clients only way to tell the dispatcher
+		//what kind of TS's should be activated, is by misiusing the SVCAddress
 		regInfo.SVCAddress = addr.SvcNone
 	}
 
@@ -138,8 +175,6 @@ func (h *AppConnHandler) doRegExchange(appServer *dispatcher.Server) (net.Packet
 	if err != nil {
 		return nil, serrors.New("registration table error", "err", err)
 	}
-
-	appConn.(*dispatcher.Conn).TsMode = regInfo.TsMode
 
 	udpAddr := appConn.(*dispatcher.Conn).LocalAddr().(*net.UDPAddr)
 	port := uint16(udpAddr.Port)
@@ -214,6 +249,19 @@ func (h *AppConnHandler) RunAppToNetDataplane() {
 		metrics.M.AppReadBytes().Add(float64(pkt.Len()))
 		metrics.M.AppReadPkts().Inc()
 
+		var sendErrMsg bool
+		//this condition implies, that we will be using a ipv4 connection
+		if pkt.UnderlayRemote.IP.To4() != nil &&
+			//we check for enabled Tx timestamp modes
+			(h.TsMode == int(addr.TxKernelRxKernel) || h.TsMode == int(addr.TxKernelHwRxKernelHw)) &&
+			(h.Ipv4UnderlayFd != 0) { //should always be okay, as we do not allow h.TsMode to be something unsupported
+			pkt.UseIpv4underlayFd = h.Ipv4UnderlayFd //this implies we use an unconnected upd4 socket to send the data out
+			pkt.TsMode = h.TsMode                    //vermutlich nicht mehr nötig
+			sendErrMsg = true
+
+			pkt.Udpv4Conn = h.Udpv4Conn //test
+		}
+
 		n, err := h.DispConn.Write(pkt)
 		if err != nil {
 			metrics.M.NetWriteErrors().Inc()
@@ -222,6 +270,15 @@ func (h *AppConnHandler) RunAppToNetDataplane() {
 			metrics.M.NetWriteBytes().Add(float64(n))
 			metrics.M.NetWritePkts().Inc()
 		}
+
+		if sendErrMsg {
+			h.Ipv4ErrQueueChan <- common.TsRequest{
+				HashPkt:    pkt.HashTsPkt,
+				ClientConn: h.Conn,
+				TimeAdded:  time.Now(),
+			}
+		}
+
 		pkt.Free()
 	}
 }

@@ -261,7 +261,7 @@ func registrationExchange(conn *Conn, reg *Registration) (uint16, error) {
 }
 
 // ReadFrom works similarly to Read. In addition to Read, it also returns the last hop
-// (usually, the border router) which sent the message.
+// (usually, the border router) which sent the message. OR the address of the next router (i.e. destination) if it is outgoing
 func (conn *Conn) ReadFrom(buf []byte) (int, net.Addr, error) {
 	n, addr, err := conn.readFrom(buf)
 	metrics.M.Reads(metrics.IOLabels{Result: labelResult(err)}).Observe(float64(n))

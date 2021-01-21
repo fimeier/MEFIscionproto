@@ -193,7 +193,9 @@ func (c *SCIONPacketConn) readFrom(pkt *Packet, ov *net.UDPAddr) error {
 	}
 
 	if ov != nil {
-		*ov = *lastHop
+		if lastHop != nil {
+			*ov = *lastHop //add a nil ip for the client => this is the expected behaviour (compare msg_hdr.msg_name=NULL)
+		}
 	}
 	return nil
 }

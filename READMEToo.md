@@ -1,3 +1,9 @@
+## Go stuff
+* siehe hier für rcvmsg go Vorbereitungen der Datenstrukturen... allenfalls kann ich etwas bei mir optimieren /usr/local/go/src/syscall/syscall_linux.go
+* https://golang.org/pkg/net/#InterfaceByIndex
+* Syscall recvmsg polling teil interessant: https://github.com/jacksontj/traceroute/blob/master/traceroute.go
+* noch was zu polling: https://blog.cloudflare.com/io_submit-the-epoll-alternative-youve-never-heard-about/
+
 ## Golang Stuff kommt eigentlich später in Debugging logik
 * siehe /home/fimeier/go/pkg/mod/github.com/google/gopacket@v1.1.16-0.20190123011826-102d5ca2098c/layers/ports.go
 ```c

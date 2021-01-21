@@ -46,35 +46,54 @@ type Server struct {
 	routingTable *IATable
 	ipv4Conn     net.PacketConn
 	ipv6Conn     net.PacketConn
+	// ServerTSExtension contains additional data to support timestamps
+	common.ServerTSExtension
 }
 
 // NewServer creates new instance of Server. Internally, it opens the dispatcher ports
 // for both IPv4 and IPv6. Returns error if the ports can't be opened.
-func NewServer(address string, ipv4Conn, ipv6Conn net.PacketConn) (*Server, error) {
+func NewServer(address string, ipv4Conn, ipv6Conn net.PacketConn, tsOpt *common.TimestampOptions) (*Server, error) {
 	metaLogger := &throttledMetaLogger{
 		Logger:      log.Root(),
 		MinInterval: OverflowLoggingInterval,
 	}
 	if ipv4Conn == nil {
 		var err error
-		ipv4Conn, err = openConn("udp4", address, metaLogger)
+		ipv4Conn, err = openConn("udp4", address, metaLogger, tsOpt)
 		if err != nil {
 			return nil, err
 		}
 	}
 	if ipv6Conn == nil {
 		var err error
-		ipv6Conn, err = openConn("udp6", address, metaLogger)
+		ipv6Conn, err = openConn("udp6", address, metaLogger, tsOpt)
 		if err != nil {
 			ipv4Conn.Close()
 			return nil, err
 		}
 	}
-	return &Server{
+
+	s := &Server{
 		routingTable: NewIATable(32768, 65535),
 		ipv4Conn:     ipv4Conn,
 		ipv6Conn:     ipv6Conn,
-	}, nil
+		ServerTSExtension: common.ServerTSExtension{
+			EnableTimestampRX:   tsOpt.EnableTimestampRX,
+			EnableTimestampTX:   tsOpt.EnableTimestampTX,
+			EnableTimestampUdp6: tsOpt.EnableTimestampUdp6,
+			Ipv4UnderlayFd:      tsOpt.FdUDPv4,
+			Ipv6UnderlayFd:      tsOpt.FdUDPv6,
+
+			Udpv4Conn: tsOpt.Udpv4Conn,
+		},
+	}
+	if tsOpt.FdUDPv4 > 0 && tsOpt.EnableTimestampTX {
+		s.Ipv4ErrQueueChan = make(chan common.TsRequest, tsOpt.ErrQueueChanCap)
+	}
+	if tsOpt.FdUDPv6 > 0 && tsOpt.EnableTimestampTX {
+		s.Ipv6ErrQueueChan = make(chan common.TsRequest, tsOpt.ErrQueueChanCap)
+	}
+	return s, nil
 }
 
 // Serve starts reading packets from network and dispatching them to different connections.
@@ -83,9 +102,19 @@ func (as *Server) Serve() error {
 	errChan := make(chan error)
 	go func() {
 		defer log.HandlePanic()
+
 		netToRingDataplane := &NetToRingDataplane{
 			UnderlayConn: as.ipv4Conn,
 			RoutingTable: as.routingTable,
+			NetToRingDataplaneTSExtension: common.NetToRingDataplaneTSExtension{
+				EnableTsRx:    as.EnableTimestampRX,
+				EnableTsTx:    as.EnableTimestampTX,
+				UnderlayFd:    as.Ipv4UnderlayFd,
+				TsRequestChan: as.Ipv4ErrQueueChan,
+				NetworkType:   "udp4",
+
+				UDPConn: as.Udpv4Conn,
+			},
 		}
 		errChan <- netToRingDataplane.Run()
 	}()
@@ -94,6 +123,14 @@ func (as *Server) Serve() error {
 		netToRingDataplane := &NetToRingDataplane{
 			UnderlayConn: as.ipv6Conn,
 			RoutingTable: as.routingTable,
+			NetToRingDataplaneTSExtension: common.NetToRingDataplaneTSExtension{
+
+				EnableTsRx:    (as.EnableTimestampRX && as.EnableTimestampUdp6),
+				EnableTsTx:    (as.EnableTimestampTX && as.EnableTimestampUdp6),
+				UnderlayFd:    as.Ipv6UnderlayFd,
+				TsRequestChan: as.Ipv6ErrQueueChan,
+				NetworkType:   "udp6",
+			},
 		}
 		errChan <- netToRingDataplane.Run()
 	}()
@@ -136,8 +173,6 @@ type Conn struct {
 	ring *ringbuf.Ring
 	// regReference is the reference to the registration in the routing table.
 	regReference registration.RegReference
-	// TsMode contains informations about activated socket options for timestamps (sciontime)
-	TsMode int
 }
 
 func (ac *Conn) WriteTo(p []byte, addr net.Addr) (int, error) {
@@ -209,7 +244,7 @@ func (ac *Conn) SetWriteDeadline(t time.Time) error {
 //
 // Note that Go-style dual-stacked IPv4/IPv6 connections are not supported. If
 // network is udp, it will be treated as udp4.
-func openConn(network, address string, p SocketMetaHandler) (net.PacketConn, error) {
+func openConn(network, address string, p SocketMetaHandler, tsOpt *common.TimestampOptions) (net.PacketConn, error) {
 	// We cannot allow the Go standard library to open both types of sockets
 	// because the socket options are specific to only one socket type, so we
 	// degrade udp to only udp4.
@@ -226,8 +261,9 @@ func openConn(network, address string, p SocketMetaHandler) (net.PacketConn, err
 	if network == "udp6" && listeningAddress.IP == nil {
 		listeningAddress.IP = net.IPv6zero
 	}
-
-	c, err := conn.New(listeningAddress, nil, &conn.Config{ReceiveBufferSize: ReceiveBufferSize})
+	c, err := conn.New(listeningAddress, nil, &conn.Config{
+		ReceiveBufferSize: ReceiveBufferSize,
+		TimestampOptions:  tsOpt})
 	if err != nil {
 		return nil, serrors.WrapStr("unable to open conn", err)
 	}
@@ -270,25 +306,25 @@ func (o *underlayConnWrapper) ReadFrom(p []byte) (int, net.Addr, error) {
 	}
 	o.Handler.Handle(meta)
 
-	/*
-		fmt.Printf("meta.KernelTS.Sec===%v\n", meta.KernelTS.Sec)
-		fmt.Printf("meta.KernelTS.Nsec===%v\n", meta.KernelTS.Nsec)
+	// What I really want: Return the meta data, or directly write it into the Packet
+	// Ugly Hack to return meta data (Timestamps) without changing to much in the application's logic
+	// Hint 1: n is not changed. In the worst case, an (unaware) callee will receive additional data, but should ignore them anyway
+	// Hint 2: with this implementaion we lose 52 bytes in max msg size. We could add this to the buffer to compensate
+	if n+52 < len(p) { //hint len(pkt.buffer)==cap(pkt.buffer) => we do not need to call append
+		binary.LittleEndian.PutUint64(p[n:], uint64(meta.KernelTS.Sec))
+		binary.LittleEndian.PutUint64(p[n+8:], uint64(meta.KernelTS.Nsec))
+		binary.LittleEndian.PutUint64(p[n+16:], uint64(meta.HwTS.Sec))
+		binary.LittleEndian.PutUint64(p[n+24:], uint64(meta.HwTS.Nsec))
 
-		fmt.Printf("meta.HwTS.Sec===%v\n", meta.HwTS.Sec)
-		fmt.Printf("meta.HwTS.Nsec===%v\n", meta.HwTS.Nsec)
-	*/
-	// Ugly Hack to return meta data (Timestamps) without changing to much in the appliactions logic
-	// Hint: p.Len() == p.Cap() => we do not need to call append
-	// Hint2: n is not changed. In the worst case, an (unaware) callee will receive additional data, but should ignore them
-	// TODO: Add failsafe n+32 < p.Cap()
-	binary.LittleEndian.PutUint64(p[n:], uint64(meta.KernelTS.Sec))
-	binary.LittleEndian.PutUint64(p[n+8:], uint64(meta.KernelTS.Nsec))
+		binary.LittleEndian.PutUint32(p[n+32:], uint32(meta.InterfaceId))
+		binary.LittleEndian.PutUint32(p[n+36:], uint32(meta.PktLengthL2))
 
-	binary.LittleEndian.PutUint64(p[n+16:], uint64(meta.HwTS.Sec))
-	binary.LittleEndian.PutUint64(p[n+24:], uint64(meta.HwTS.Nsec))
-
-	// TODO: Use the interface data and ip data for something useful
-	// meta.......
+		binary.LittleEndian.PutUint32(p[n+40:], uint32(meta.Ipi.Ifindex))
+		copy(p[n+44:], meta.Ipi.Spec_dst[:])
+		copy(p[n+48:], meta.Ipi.Addr[:])
+	} else {
+		log.Error("no space available to return the additional timestamp data. n=%v len(p)=%v", n, len(p))
+	}
 
 	return n, meta.Src, err
 }

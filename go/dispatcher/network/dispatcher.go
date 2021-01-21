@@ -18,6 +18,7 @@ import (
 	"os"
 
 	"github.com/scionproto/scion/go/dispatcher/dispatcher"
+	"github.com/scionproto/scion/go/lib/common"
 	"github.com/scionproto/scion/go/lib/log"
 	"github.com/scionproto/scion/go/lib/serrors"
 	"github.com/scionproto/scion/go/lib/sock/reliable"
@@ -27,10 +28,11 @@ type Dispatcher struct {
 	UnderlaySocket    string
 	ApplicationSocket string
 	SocketFileMode    os.FileMode
+	TimestampOpt      common.TimestampOptions
 }
 
 func (d *Dispatcher) ListenAndServe() error {
-	dispServer, err := dispatcher.NewServer(d.UnderlaySocket, nil, nil)
+	dispServer, err := dispatcher.NewServer(d.UnderlaySocket, nil, nil, &d.TimestampOpt)
 	if err != nil {
 		return err
 	}

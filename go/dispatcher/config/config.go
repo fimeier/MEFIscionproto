@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/scionproto/scion/go/lib/common"
 	"github.com/scionproto/scion/go/lib/config"
 	"github.com/scionproto/scion/go/lib/env"
 	"github.com/scionproto/scion/go/lib/log"
@@ -51,6 +52,8 @@ type Dispatcher struct {
 	// DeleteSocket specifies whether the dispatcher should delete the
 	// socket file prior to attempting to create a new one.
 	DeleteSocket bool `toml:"delete_socket,omitempty"`
+	// DispatcherTSExtension contains additional data to support timestamps
+	common.DispatcherTSExtension
 }
 
 func (cfg *Config) InitDefaults() {
@@ -68,6 +71,9 @@ func (cfg *Config) Validate() error {
 	}
 	if cfg.Dispatcher.ID == "" {
 		return serrors.New("id must be set")
+	}
+	if !cfg.Dispatcher.TimestampRX && cfg.Dispatcher.TimestampTX {
+		return serrors.New("cannot enable TimestampTX without TimestampRX")
 	}
 	return config.ValidateAll(&cfg.Logging, &cfg.Metrics)
 }

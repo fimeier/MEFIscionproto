@@ -16,6 +16,7 @@
 package dispatcher
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/google/gopacket"
@@ -46,9 +47,36 @@ const (
 type NetToRingDataplane struct {
 	UnderlayConn net.PacketConn
 	RoutingTable *IATable
+	// NetToRingDataplaneTSExtension contains additional data to support timestamps
+	common.NetToRingDataplaneTSExtension
 }
 
 func (dp *NetToRingDataplane) Run() error {
+
+	// If enabled, the dispatcher will return error Msg's generated for Applications
+	// Conditions:
+	//	a) feature is enabled
+	//	b) the client requested it for the outgoing packet
+	// Result: Send the original payload (without L2: here I mean Network Layer) together with parsed
+	//			"CmsgHdr meta data" to the client
+	// Hint: This will be called once i.e. there is one Routine for the dispatcher. Same design as for regular "rcvmsg()-calls"
+	//			As can be seen in the logic below
+	if dp.EnableTsTx {
+		fd := dp.UnderlayFd
+		go func() {
+			defer log.HandlePanic()
+			for {
+				//		//dp.UnderlayConn
+				if err := respool.DecodeFromConnERRQueue(dp.UDPConn, fd, dp.TsRequestChan); err != nil {
+					//TBD
+					fmt.Printf("I should never return....\n")
+					fmt.Printf("gibts nur einmal und muss auch nicht gekillt werden....?.\n")
+				}
+			}
+
+		}()
+	}
+
 	for {
 		pkt := respool.GetPacket()
 		// XXX(scrye): we don't release the reference on error conditions, and

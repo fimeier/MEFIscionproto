@@ -26,6 +26,7 @@ require (
 	github.com/pelletier/go-toml v1.8.1-0.20200708110244-34de94e6a887
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/prometheus/client_golang v1.6.0
+	github.com/prometheus/common v0.9.1
 	github.com/sergi/go-diff v1.0.1-0.20180205163309-da645544ed44
 	github.com/smartystreets/goconvey v1.6.4
 	github.com/songgao/water v0.0.0-20190725173103-fd331bda3f4b
