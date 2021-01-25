@@ -250,14 +250,19 @@ func (h *AppConnHandler) RunAppToNetDataplane() {
 		metrics.M.AppReadPkts().Inc()
 
 		var sendErrMsg bool
+		numErrMsg := 1
 		//this condition implies, that we will be using a ipv4 connection
-		if pkt.UnderlayRemote.IP.To4() != nil &&
+		if pkt.UnderlayRemote != nil && pkt.UnderlayRemote.IP.To4() != nil &&
 			//we check for enabled Tx timestamp modes
 			(h.TsMode == int(addr.TxKernelRxKernel) || h.TsMode == int(addr.TxKernelHwRxKernelHw)) &&
 			(h.Ipv4UnderlayFd != 0) { //should always be okay, as we do not allow h.TsMode to be something unsupported
 			pkt.UseIpv4underlayFd = h.Ipv4UnderlayFd //this implies we use an unconnected upd4 socket to send the data out
 			pkt.TsMode = h.TsMode                    //vermutlich nicht mehr nötig
 			sendErrMsg = true
+
+			if h.TsMode == int(addr.TxKernelHwRxKernelHw) {
+				numErrMsg = 2
+			}
 
 			pkt.Udpv4Conn = h.Udpv4Conn //test
 		}
@@ -271,11 +276,13 @@ func (h *AppConnHandler) RunAppToNetDataplane() {
 			metrics.M.NetWritePkts().Inc()
 		}
 
-		if sendErrMsg {
-			h.Ipv4ErrQueueChan <- common.TsRequest{
-				HashPkt:    pkt.HashTsPkt,
-				ClientConn: h.Conn,
-				TimeAdded:  time.Now(),
+		if sendErrMsg && err == nil {
+			for i := 0; i < numErrMsg; i++ {
+				h.Ipv4ErrQueueChan <- common.TsRequest{
+					HashPkt:    pkt.HashTsPkt,
+					ClientConn: h.Conn,
+					TimeAdded:  time.Now(),
+				}
 			}
 		}
 

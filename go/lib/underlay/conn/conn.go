@@ -425,10 +425,10 @@ func (c *connUDPBase) handleCmsg(oob common.RawBytes, meta *ReadMeta, readTime t
 			tsInfo := *(*[2]uint32)(unsafe.Pointer(&oob[sizeofCmsgHdr]))
 			meta.InterfaceId = tsInfo[0]
 			meta.PktLengthL2 = tsInfo[1]
-			//fmt.Printf("tsInfo[0]=%v tsInfo[1]=%v\n", tsInfo[0], tsInfo[1])
+			//fmt.Printf("tsInfo[0]=%v tsInfo[1]=%v\n", tsInfo[0], tsInfo[1]) //beim Rx Ts wird das getriggert
 		case hdr.Level == syscall.IPPROTO_IP && hdr.Type == unix.IP_PKTINFO:
 			meta.Ipi = *(*syscall.Inet4Pktinfo)(unsafe.Pointer(&oob[sizeofCmsgHdr]))
-			//fmt.Printf("ipi.Ifindex=%v ipi.Spec_dst=%v ipi.Addr=%v\n", meta.Ipi.Ifindex, meta.Ipi.Spec_dst, meta.Ipi.Addr)
+			//fmt.Printf("ipi.Ifindex=%v ipi.Spec_dst=%v ipi.Addr=%v\n", meta.Ipi.Ifindex, meta.Ipi.Spec_dst, meta.Ipi.Addr) //und dieses auch... addr sind jeweils die lokalen hier als ersteller/ziel
 		default:
 			//fmt.Printf("handleCmsg: Unimplemented case:: hdr.Level=%v hdr.Type=%v", hdr.Level, hdr.Type)
 		}

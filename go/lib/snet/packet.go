@@ -314,7 +314,7 @@ func (p *Packet) Decode() error {
 		}
 		//the size of the buffer - Payload are the "missing bytes" after the udp packet
 		scionLayerPayloadLen := len(scionLayer.Payload)
-		if scionLayerPayloadLen == int(scionLayer.PayloadLen+4*8) {
+		if scionLayerPayloadLen == int(scionLayer.PayloadLen+52) {
 			//trying to get some TS's out of the packet
 			//having access to connection settings (TsMode) would this make easier
 			//anyway: The additional data is ignored, but returned as part of the buffer pack to the application
@@ -329,6 +329,12 @@ func (p *Packet) Decode() error {
 				Sec:  int64(binary.LittleEndian.Uint64(scionLayer.Payload[scionLayer.PayloadLen+16:])),
 				Nsec: int64(binary.LittleEndian.Uint64(scionLayer.Payload[scionLayer.PayloadLen+24:])),
 			}
+
+			p.InterfaceID = uint32(binary.LittleEndian.Uint32(scionLayer.Payload[scionLayer.PayloadLen+32:]))
+			p.PktLengthL2 = uint32(binary.LittleEndian.Uint32(scionLayer.Payload[scionLayer.PayloadLen+36:]))
+			p.Ipi = syscall.Inet4Pktinfo{Ifindex: int32(binary.LittleEndian.Uint32(scionLayer.Payload[scionLayer.PayloadLen+40:]))}
+			copy(p.Ipi.Spec_dst[:], scionLayer.Payload[scionLayer.PayloadLen+44:])
+			copy(p.Ipi.Addr[:], scionLayer.Payload[scionLayer.PayloadLen+48:])
 
 			//TODO: Decide if this is needed.
 			//if someone is using the received data directly, with this fix, there is no difference compared to before ScionTime
@@ -524,14 +530,25 @@ type PacketInfo struct {
 	Path spath.Path
 	// Payload is the Payload of the message.
 	Payload Payload
-	// KernelTS contains a kernel timestamp
-	//
-	// Contains garbage if not enabled by application
+
+	//use this once finished... IDE is struggling on chrony with nested structs in cgo projects
+	//--->common.PacketTSExtensionClient<-----
+
 	KernelTS syscall.Timespec
 	// HwTS contains a hardware timestamp
-	//
-	// Contains garbage if not enabled by application
 	HwTS syscall.Timespec
+	// InterfaceID is equal to struct scm_ts_pktinfo.if_index (if in use)
+	//
+	// Rx timestamps will fill this in
+	InterfaceID uint32
+	// PktLengthL2 is equal to struct scm_ts_pktinfo.pkt_length (if in use)
+	//
+	// Rx timestamps will fill this in
+	PktLengthL2 uint32
+	// Ipi is equal to Inet4Pktinfo struct
+	//
+	// Hint: Using Ipi.Ifindex as this used by Rx AND Tx timestamps
+	Ipi syscall.Inet4Pktinfo
 }
 
 func netAddrToHostAddr(a net.Addr) (addr.HostAddr, error) {

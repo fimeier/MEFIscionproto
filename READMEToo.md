@@ -108,10 +108,9 @@ type SocketControlMessage struct {
 ```
 
 ## How TO Debug Dispatcher
-1. dispatcher must be started first (I guess because of the Control Service (CS) instance)2. start the rest....
-3. Iff the dispatcher is restarted, the CS will give up at some point => no communication possible
-   1. restart it
-   2. or implement autorestart in supervisord
+1. start all
+2. stop dispatcher and start debugging if needed
+HINT: ./runMeTooDebugDispatcher.bash should be run after dispatcher restart or if it is blocking at some point => router's tend to crash, has nothing to do with my changes
 
 
 ## How TO Build
@@ -131,6 +130,7 @@ do
   go build -o ./bin/ ./go/${service}/ && echo "Built ${service}";
 done
 
+/*
 export PYTHONPATH=python/:.git 
 => neu wohl export PYTHONPATH=.
 
@@ -141,6 +141,7 @@ python3 python/topology/generator.py -c ./topology/tiny4.topo
 rm gen/jaeger-dc.yml
 
 mkdir gen-cache
+*/
 
 => am besten killen, da sonst das ALTE Konfig File neu geladen wird (oder neustarten)
 kill -HUD "ps -efa | grep supervisord nimmt den user process...."

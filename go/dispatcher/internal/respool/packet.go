@@ -166,6 +166,10 @@ NEXTROUND:
 		PktLengthL2 = 0
 		Ipi = syscall.Inet4Pktinfo{}
 
+		// RunAppToNetDataplane() fügt zwei Messages ein falls Kernel und HW erwartet wird.
+		// Falls HW streikt, müssen diese entfernt werden damit kein busywait draus resultiert
+		// Oder Lokig sonst anpasen
+
 		//remove Items
 		for _, data := range errQueueMsgSet {
 			if data.Used {
@@ -179,9 +183,21 @@ NEXTROUND:
 			}
 		}
 
+		itsGarbageTime := time.Now()
+		//TODO same for errQueueMsgSet
+		for hash, tsRequest := range tsRequestSet {
+			if tsRequest.TimeAdded.Add(common.TimeoutTxErrMsg).Before(itsGarbageTime) {
+				fmt.Printf("I should delete this entry %v with TimeAdded %v\n", hash, tsRequest.TimeAdded)
+				//delete(tsRequestSet, hash)
+			}
+
+		}
+
+		fmt.Printf("len(tsRequestSet)=%v\n", len(tsRequestSet))
+
 		//len(tsRequestSet) == 0 => if we have nothing to compare we must/will wait
 		availableRequests := math.Min(float64(len(tsRequestChan)), 10)
-		for availableRequests > 0 {
+		for len(tsRequestSet) == 0 || (availableRequests > 0) { //prüfe ob das so wieder deadlock gibt
 
 			tsRequestNew := <-tsRequestChan
 
@@ -332,20 +348,26 @@ NEXTROUND:
 				case hdr.Level == syscall.SOL_SOCKET && hdr.Type == syscall.SO_TIMESTAMPNS:
 					fmt.Printf("not implemented\n")
 				case hdr.Level == syscall.SOL_SOCKET && hdr.Type == syscall.SCM_TIMESTAMPING:
+					//Hint: There is always just one header set
 					scmTimestamping := *(*[3]syscall.Timespec)(unsafe.Pointer(&oob[sizeofCmsgHdr]))
 					KernelTS = scmTimestamping[0]
 					HwTS = scmTimestamping[2]
+					if scmTimestamping[0].Sec == 0 {
+						fmt.Printf("No Kernel TS...\n")
+					}
 					if scmTimestamping[2].Sec != 0 {
-						fmt.Printf("Received a HW-Timestamp :-D: scmTimestamping[2]=%v scmTimestamping[2].Nsec=%v\n", scmTimestamping[2].Sec, scmTimestamping[2].Nsec)
+						fmt.Printf("Received a !!TX!!HW-Timestamp :-D: scmTimestamping[2]=%v scmTimestamping[2].Nsec=%v\n", scmTimestamping[2].Sec, scmTimestamping[2].Nsec)
+					} else {
+						fmt.Printf("No HW TS...\n")
 					}
 				case hdr.Level == syscall.SOL_SOCKET && hdr.Type == unix.SCM_TIMESTAMPING_PKTINFO:
 					tsInfo := *(*[2]uint32)(unsafe.Pointer(&oob[sizeofCmsgHdr]))
 					InterfaceID = tsInfo[0]
 					PktLengthL2 = tsInfo[1]
-					//fmt.Printf("tsInfo[0]=%v tsInfo[1]=%v\n", tsInfo[0], tsInfo[1])
+					fmt.Printf("tsInfo[0]=%v tsInfo[1]=%v\n", tsInfo[0], tsInfo[1])
 				case hdr.Level == syscall.IPPROTO_IP && hdr.Type == unix.IP_PKTINFO:
 					Ipi = *(*syscall.Inet4Pktinfo)(unsafe.Pointer(&oob[sizeofCmsgHdr]))
-					//fmt.Printf("ipi.Ifindex=%v ipi.Spec_dst=%v ipi.Addr=%v\n", Ipi.Ifindex, Ipi.Spec_dst, Ipi.Addr)
+					fmt.Printf("ipi.Ifindex=%v ipi.Spec_dst=%v ipi.Addr=%v\n", Ipi.Ifindex, Ipi.Spec_dst, Ipi.Addr) //beim TX Ts wird das getriggert
 				case hdr.Level == syscall.SOL_IP && hdr.Type == syscall.IP_RECVERR:
 					var sockErr common.SockExtendedErr
 					sockErr = *(*common.SockExtendedErr)(unsafe.Pointer(&oob[sizeofCmsgHdr]))
@@ -415,13 +437,28 @@ NEXTROUND:
 		//add the timestamps to the databuffer
 		offset := len(bufferIOV)
 		//Increase the Buffer to add Timestamps
-		bufferIOV = bufferIOV[:offset+32]
+		bufferIOV = bufferIOV[:offset+52]
 		binary.LittleEndian.PutUint64(bufferIOV[offset:], uint64(KernelTS.Sec))
 		binary.LittleEndian.PutUint64(bufferIOV[offset+8:], uint64(KernelTS.Nsec))
 		binary.LittleEndian.PutUint64(bufferIOV[offset+16:], uint64(HwTS.Sec))
 		binary.LittleEndian.PutUint64(bufferIOV[offset+24:], uint64(HwTS.Nsec))
-		//TODO add other infos if needed. Compare Rx-Timestamps
 
+		binary.LittleEndian.PutUint32(bufferIOV[offset+32:], uint32(InterfaceID))
+		binary.LittleEndian.PutUint32(bufferIOV[offset+36:], uint32(PktLengthL2))
+
+		binary.LittleEndian.PutUint32(bufferIOV[offset+40:], uint32(Ipi.Ifindex))
+		copy(bufferIOV[offset+44:], Ipi.Spec_dst[:])
+		copy(bufferIOV[offset+48:], Ipi.Addr[:])
+
+		if KernelTS.Sec != 0 && HwTS.Sec == 0 {
+			fmt.Printf("forwardin TX-Ts paket containing KernelTS %v\n", KernelTS)
+		}
+		if KernelTS.Sec == 0 && HwTS.Sec != 0 {
+			fmt.Printf("forwardin TX-Ts paket containing HwTs %v\n", HwTS)
+		}
+		if KernelTS.Sec != 0 && HwTS.Sec != 0 {
+			fmt.Printf("forwardin TX-Ts paket containing Kernel %v and HwTs %v\n", KernelTS, HwTS)
+		}
 		//"42" removes L2 Stuff.... without it we get a "parsable" SCION packet
 		clientConn.WriteTo(bufferIOV[42:], addr)
 
@@ -449,7 +486,7 @@ func (pkt *Packet) DecodeFromConn(conn net.PacketConn) error {
 			Sec:  int64(binary.LittleEndian.Uint64(pkt.buffer[n+16:])),
 			Nsec: int64(binary.LittleEndian.Uint64(pkt.buffer[n+24:])),
 		}
-		pkt.InterfaceId = uint32(binary.LittleEndian.Uint32(pkt.buffer[n+32:]))
+		pkt.InterfaceID = uint32(binary.LittleEndian.Uint32(pkt.buffer[n+32:]))
 		pkt.PktLengthL2 = uint32(binary.LittleEndian.Uint32(pkt.buffer[n+36:]))
 		pkt.Ipi = syscall.Inet4Pktinfo{Ifindex: int32(binary.LittleEndian.Uint32(pkt.buffer[n+40:]))}
 		copy(pkt.Ipi.Spec_dst[:], pkt.buffer[n+44:])
@@ -511,7 +548,7 @@ func (pkt *Packet) SendOnConn(conn net.PacketConn, address net.Addr) (int, error
 	//	b) the packet has flags enable to create Tx timestamps (kernel or kernel and hw)
 	// Result: special syscall to enable TS's and send the message
 	if pkt.UseIpv4underlayFd != 0 && (pkt.TsMode == int(addr.TxKernelRxKernel) || pkt.TsMode == int(addr.TxKernelHwRxKernelHw)) {
-		fd := pkt.UseIpv4underlayFd
+		///fd := pkt.UseIpv4underlayFd
 		toSend := common.RawBytes(pkt.buffer)
 
 		dst, ok := address.(*net.UDPAddr)
@@ -528,7 +565,7 @@ func (pkt *Packet) SendOnConn(conn net.PacketConn, address net.Addr) (int, error
 		sa := &syscall.SockaddrInet4{Port: dst.Port}
 		copy(sa.Addr[:], ip4)
 
-		flags := 0
+		///flags := 0
 		var flagsCmsgData uint32
 		flagsCmsgData = unix.SOF_TIMESTAMPING_TX_SOFTWARE
 		if pkt.TsMode == int(addr.TxKernelHwRxKernelHw) {
@@ -551,13 +588,15 @@ func (pkt *Packet) SendOnConn(conn net.PacketConn, address net.Addr) (int, error
 
 		//two Versions with similar performance
 		//start := time.Now()
-		//n, _, err := pkt.Udpv4Conn.WriteMsgUDP(toSend, oobBuffer, dst)
-		err := syscall.Sendmsg(fd, toSend, oobBuffer, sa, flags)
+		n, _, err := pkt.Udpv4Conn.WriteMsgUDP(toSend, oobBuffer, dst)
+		///err := syscall.Sendmsg(fd, toSend, oobBuffer, sa, flags)
 		if err != nil {
 			fmt.Printf("err=%v", err)
 			return 0, err
 		}
-		n := len(toSend)
+
+		///n := len(toSend)
+
 		//t := time.Now()
 		//elapsed := t.Sub(start)
 		//fmt.Printf("sendTime=%v\n", elapsed)
@@ -574,22 +613,30 @@ func (pkt *Packet) SendOnConn(conn net.PacketConn, address net.Addr) (int, error
 	case *reliable.Conn: //this implies we forward data to the application's socket
 		//there is no need to identify the specific TS modes (timestamps enabled => Rx-timestamps enabled)
 		if conn.(*reliable.Conn).TsMode != 0 {
-			//fmt.Printf("conn.(*reliable.Conn).TsMode=%v WE NEED TO ADD A TIMESTAMP\n", conn.(*reliable.Conn).TsMode)
+
 			buffLen := pkt.buffer.Len()
-			pkt.buffer = pkt.buffer[:buffLen+32]
-			/*
-				ASSUMPTION:
-				Manipulation of pkt.buffer is enough, i.e. just add the data.
-			*/
-			/*
-				Man könnte TS's auch durch Anpassung SerializeTo//framing protocol übermitteln
-				Dies würde jedoch mehr Änderungen nötig machen.
-			*/
-			//TODO: Forward other informations and add failsafe buffLen+x <= cap(pkt.buffer)
-			binary.LittleEndian.PutUint64(pkt.buffer[buffLen:], uint64(pkt.KernelTS.Sec))
-			binary.LittleEndian.PutUint64(pkt.buffer[buffLen+8:], uint64(pkt.KernelTS.Nsec))
-			binary.LittleEndian.PutUint64(pkt.buffer[buffLen+16:], uint64(pkt.HwTS.Sec))
-			binary.LittleEndian.PutUint64(pkt.buffer[buffLen+24:], uint64(pkt.HwTS.Nsec))
+			if buffLen+52 < cap(pkt.buffer) {
+				pkt.buffer = pkt.buffer[:buffLen+52]
+				/*
+					ASSUMPTION:
+					Manipulation of pkt.buffer is enough, i.e. just add the data.
+				*/
+				/*
+					Man könnte TS's auch durch Anpassung SerializeTo//framing protocol übermitteln
+					Dies würde jedoch mehr Änderungen nötig machen.
+				*/
+				binary.LittleEndian.PutUint64(pkt.buffer[buffLen:], uint64(pkt.KernelTS.Sec))
+				binary.LittleEndian.PutUint64(pkt.buffer[buffLen+8:], uint64(pkt.KernelTS.Nsec))
+				binary.LittleEndian.PutUint64(pkt.buffer[buffLen+16:], uint64(pkt.HwTS.Sec))
+				binary.LittleEndian.PutUint64(pkt.buffer[buffLen+24:], uint64(pkt.HwTS.Nsec))
+
+				binary.LittleEndian.PutUint32(pkt.buffer[buffLen+32:], uint32(pkt.InterfaceID))
+				binary.LittleEndian.PutUint32(pkt.buffer[buffLen+36:], uint32(pkt.PktLengthL2))
+
+				binary.LittleEndian.PutUint32(pkt.buffer[buffLen+40:], uint32(pkt.Ipi.Ifindex))
+				copy(pkt.buffer[buffLen+44:], pkt.Ipi.Spec_dst[:])
+				copy(pkt.buffer[buffLen+48:], pkt.Ipi.Addr[:])
+			}
 		}
 	}
 
@@ -603,7 +650,7 @@ func (pkt *Packet) reset() {
 
 	pkt.KernelTS = syscall.Timespec{}
 	pkt.HwTS = syscall.Timespec{}
-	pkt.InterfaceId = 0
+	pkt.InterfaceID = 0
 	pkt.PktLengthL2 = 0
 	pkt.Ipi = syscall.Inet4Pktinfo{}
 	pkt.TsMode = 0
