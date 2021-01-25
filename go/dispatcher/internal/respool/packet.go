@@ -183,12 +183,34 @@ NEXTROUND:
 			}
 		}
 
+		//Why it is important: As failsafe
+		//If we don't receive a message from the system for a channel message, then we will never block
+		//and therefore have a busy loop. Besides: At some point we could also become a memory problem
+		//but I assume the cpu will melt before that :-D
 		itsGarbageTime := time.Now()
 		//TODO same for errQueueMsgSet
 		for hash, tsRequest := range tsRequestSet {
 			if tsRequest.TimeAdded.Add(common.TimeoutTxErrMsg).Before(itsGarbageTime) {
 				fmt.Printf("I should delete this entry %v with TimeAdded %v\n", hash, tsRequest.TimeAdded)
+				//activate it when you can test it ;-)
 				//delete(tsRequestSet, hash)
+			}
+
+		}
+		//We want to remove them to safe space and prevent memory growth
+		for _, data := range errQueueMsgSet {
+			if data.TimeAdded.Add(common.TimeoutTxErrMsg).Before(itsGarbageTime) {
+				fmt.Printf("I should delete this entry in errQueueMsgSet with TimeAdded %v\n", data.TimeAdded)
+				//activate it when you can test it ;-)
+				/*
+					if len(errQueueMsgSet) == 1 {
+						errQueueMsgSet = errQueueMsgSet[:0]
+					} else {
+						errQueueMsgSet = errQueueMsgSet[1:]
+					}
+				*/
+			} else {
+				break //the assumption here: all elements after this have an newer TimeAdded, so we can stop testing
 			}
 
 		}
