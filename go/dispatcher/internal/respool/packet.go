@@ -193,7 +193,7 @@ NEXTROUND:
 			if tsRequest.TimeAdded.Add(common.TimeoutTxErrMsg).Before(itsGarbageTime) {
 				fmt.Printf("I should delete this entry %v with TimeAdded %v\n", hash, tsRequest.TimeAdded)
 				//activate it when you can test it ;-)
-				//delete(tsRequestSet, hash)
+				delete(tsRequestSet, hash)
 			}
 
 		}
@@ -480,6 +480,9 @@ NEXTROUND:
 		}
 		if KernelTS.Sec != 0 && HwTS.Sec != 0 {
 			fmt.Printf("forwardin TX-Ts paket containing Kernel %v and HwTs %v\n", KernelTS, HwTS)
+		}
+		if KernelTS.Sec == 0 && HwTS.Sec == 0 {
+			fmt.Printf("No Ts in this paket %v (this shouldn't happen)\n", KernelTS, HwTS)
 		}
 		//"42" removes L2 Stuff.... without it we get a "parsable" SCION packet
 		clientConn.WriteTo(bufferIOV[42:], addr)

@@ -84,10 +84,11 @@ const (
 
 		=> Assuming NTP-like application: a client will at least ask for Rx-Kernel Timestamps, iff Timestamps are needed
 	*/
-	RxKernel             HostSVC = 0xaaa0
-	RxKernelHw           HostSVC = 0xaaa1
-	TxKernelRxKernel     HostSVC = 0xaaa2
-	TxKernelHwRxKernelHw HostSVC = 0xaaa3
+	//I guess we have to be below SVCMcast
+	RxKernel             HostSVC = 0x4242
+	RxKernelHw           HostSVC = 0x4243
+	TxKernelRxKernel     HostSVC = 0x4244
+	TxKernelHwRxKernelHw HostSVC = 0x4245
 )
 
 type HostAddr interface {
@@ -301,6 +302,14 @@ func (h HostSVC) BaseString() string {
 		return "SIG"
 	case SvcWildcard:
 		return "Wildcard"
+	case RxKernel:
+		return "RxKernel"
+	case RxKernelHw:
+		return "RxKernelHw"
+	case TxKernelRxKernel:
+		return "TxKernelRxKernel"
+	case TxKernelHwRxKernelHw:
+		return "TxKernelHwRxKernelHw"
 	default:
 		return "UNKNOWN"
 	}

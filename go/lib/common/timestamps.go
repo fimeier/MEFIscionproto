@@ -32,7 +32,7 @@ const SizeOfScmTimestamping = int(unsafe.Sizeof([3]syscall.Timespec{}))
 type TimestampOptions struct {
 	EnableTimestampRX   bool //Could also be called EnableTimestamp, as we cannot have TX without RX. Is enforced and communicated to the user.
 	EnableTimestampTX   bool
-	HwTimestampDevice   string
+	HwTimestampDevice   string //isn't used at the moment
 	EnableTimestampUdp6 bool
 	FdUDPv4             int
 	FdUDPv6             int
@@ -155,7 +155,7 @@ type DispatcherTSExtension struct {
 	// TimestampTX specifies whether the dispatcher should enable tx-Timestamps
 	// and provide them to applications who asked for them.
 	TimestampTX bool `toml:"timestamp_tx,omitempty"`
-	// HwTimestamp enables hardware timestamping from the specified network interface.
+	// HwTimestamp enables hardware timestamping on the specified network interface.
 	HwTimestamp string `toml:"hwtimestamp,omitempty"`
 	// HwTimestamp enables hardware timestamping from the specified network interface.
 	EnableTimestampUdp6 bool `toml:"timestamp_udp6,default:false"`
@@ -168,6 +168,7 @@ type DispatcherTSExtension struct {
 type ServerTSExtension struct {
 	EnableTimestampRX   bool
 	EnableTimestampTX   bool
+	HwTimestampDevice   string
 	EnableTimestampUdp6 bool //disabled in dispatcher/main.go
 	Ipv4UnderlayFd      int
 	Ipv6UnderlayFd      int

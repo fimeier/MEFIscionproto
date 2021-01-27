@@ -80,6 +80,7 @@ func NewServer(address string, ipv4Conn, ipv6Conn net.PacketConn, tsOpt *common.
 		ServerTSExtension: common.ServerTSExtension{
 			EnableTimestampRX:   tsOpt.EnableTimestampRX,
 			EnableTimestampTX:   tsOpt.EnableTimestampTX,
+			HwTimestampDevice:   tsOpt.HwTimestampDevice, //TODO: Set this if we are on the correct device
 			EnableTimestampUdp6: tsOpt.EnableTimestampUdp6,
 			Ipv4UnderlayFd:      tsOpt.FdUDPv4,
 			Ipv6UnderlayFd:      tsOpt.FdUDPv6,

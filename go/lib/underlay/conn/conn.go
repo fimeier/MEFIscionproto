@@ -240,12 +240,13 @@ func (cc *connUDPBase) initConnUDP(network string, laddr, raddr *net.UDPAddr, cf
 				"network", network, "listen", laddr, "remote", raddr)
 		}
 	}
+	var ipv4fd int
 	if network == "udp4" && (cfg.EnableTimestampRX || cfg.EnableTimestampTX) {
 		connUDPValue := reflect.ValueOf(c)
 		conn := reflect.Indirect(reflect.Indirect(connUDPValue).FieldByName("conn"))
 		netFD := reflect.Indirect(reflect.Indirect(conn).FieldByName("fd"))
 		pfd := reflect.Indirect(netFD.FieldByName("pfd"))
-		ipv4fd := int(pfd.FieldByName("Sysfd").Int())
+		ipv4fd = int(pfd.FieldByName("Sysfd").Int())
 		cfg.TimestampOptions.FdUDPv4 = ipv4fd
 		cfg.Udpv4Conn = c
 	}
@@ -258,18 +259,51 @@ func (cc *connUDPBase) initConnUDP(network string, laddr, raddr *net.UDPAddr, cf
 			"listen", laddr, "remote", raddr)
 	}
 
-	//TODO: HWTs-Flags entfernen falls nicht angefrag, device etc.... nicht alles kann hier geändert werden. binding nic müsste bereits früher stattfinden
+	//TODO: HW TS Flags NUR für angegebenen nic aktivieren
 	if network == "udp4" && (cfg.EnableTimestampRX || cfg.EnableTimestampTX) {
 		//Used to map MSG_ERRQUEUE messages including Timestamps with NTP packets
 		//For the "Dispatcher-Setting": Those addresses are meaningless, as we always have the "same destination, i.e. next hop"
-		//but we still get the device back (relevant for hw timestamps, i.e. to identify the hw-clock in a multi-nic setting)
+		//but we still get the device back (relevant for hw timestamps, i.e. to identify the hw-clock in a multi-nic setting and for automated configurations)
 		if err := sockctrl.SetsockoptInt(c, syscall.IPPROTO_IP, syscall.IP_PKTINFO, 1); err != nil {
 			return serrors.WrapStr("Error setting IP_PKTINFO socket option", err,
 				"listen", laddr, "remote", raddr)
 		}
 		flagsRX := unix.SOF_TIMESTAMPING_SOFTWARE | unix.SOF_TIMESTAMPING_RX_SOFTWARE | unix.SOF_TIMESTAMPING_RAW_HARDWARE | unix.SOF_TIMESTAMPING_RX_HARDWARE | unix.SOF_TIMESTAMPING_OPT_PKTINFO | unix.SOF_TIMESTAMPING_OPT_TX_SWHW | unix.SOF_TIMESTAMPING_OPT_CMSG
 		//flagsTX := unix.SOF_TIMESTAMPING_TX_SOFTWARE | unix.SOF_TIMESTAMPING_TX_HARDWARE
+
+		if cfg.HwTimestampDevice == "" {
+			fmt.Printf("We do not enable HW Timestamps.....\n")
+			//TODO: Check if flags are necessary and sufficient
+			flagsRX = unix.SOF_TIMESTAMPING_SOFTWARE | unix.SOF_TIMESTAMPING_RX_SOFTWARE | unix.SOF_TIMESTAMPING_OPT_PKTINFO | unix.SOF_TIMESTAMPING_OPT_TX_SWHW | unix.SOF_TIMESTAMPING_OPT_CMSG
+		}
+
+		/*
+			The following is not working.
+			Besides that, no sure if this is even a good idea to bind the socket to a device on the dispatcher
+		*/
+		iface, err := net.InterfaceByName(cfg.HwTimestampDevice)
+		if err != nil {
+			fmt.Printf("%v", err)
+		} else {
+			fmt.Printf("iface=%v\n", iface)
+			fmt.Printf("iface.Index=%v\n", iface.Index)
+			fmt.Printf("iface.Name=%v\n", iface.Name)
+			//Not permitted on one system, working on the other system!
+			if err := syscall.SetsockoptString(ipv4fd, syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, iface.Name); err != nil {
+				fmt.Printf("Can't bind socket %v to device %v got error: %v\n", ipv4fd, iface.Name, err)
+			}
+			//Not found
+			if err := syscall.SetsockoptInt(ipv4fd, syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, iface.Index); err != nil {
+				fmt.Printf("Can't bind socket %v to device %v got error: %v\n", ipv4fd, iface.Index, err)
+			}
+			//Not found
+			if err := sockctrl.SetsockoptInt(c, syscall.SOL_SOCKET, syscall.SO_BINDTODEVICE, iface.Index); err != nil {
+				fmt.Printf("Can't bind socket %v to device %v got error: %v\n", c, iface.Index, err)
+			}
+		}
+
 		flags := flagsRX // we never activate the tx flags in the dispatcher setting | flagsTX
+
 		//Here we activate the Timestamping options
 		if err := sockctrl.SetsockoptInt(c, syscall.SOL_SOCKET, syscall.SO_TIMESTAMPING, flags); err != nil {
 			//This are the "original flags": Those informations are parsed as a subset and remain accessible by all applications (logger,...)

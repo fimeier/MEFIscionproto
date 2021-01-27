@@ -143,8 +143,24 @@ func (h *AppConnHandler) doRegExchange(appServer *dispatcher.Server) (net.Packet
 
 		//TODO Iff the client asks for something that is not supported decide what to do
 		//At the moment we just ignore it
-		//I guess we should let the client "crash"
-		//Ignoring Hw Timestamps is "ok"
+		//I guess we should let the client "crash", otherwise (a client like chrony) also needs to test the supported settings (could be done, but overkill)
+		//Ignoring Hw Timestamps is "ok" <= Explanation: Nothing will crash, but chrony will wait a few ms.
+		/*
+			What a typicall application will do, as it is expected that HW-Tx(!) timestamps can have a delay of up to 200ms:
+			Hint: File Input will be "ignored", just waiting for the missed HW-Tx-Ts comming in on ERR_Queue/File Exception
+
+			2021-01-27T12:30:58Z sched.c:653:(fill_fd_sets) mefi::add fd=13 for SCH_FILE_INPUT
+			2021-01-27T12:30:58Z sched.c:671:(fill_fd_sets) mefi::add fd=13 for SCH_FILE_EXCEPTION
+
+			2021-01-27T12:30:58Z ntp_io.c:412:(read_from_socket) mefi:: fd=13 and event=file input
+			2021-01-27T12:30:58Z ntp_io_linux.c:512:(suspend_socket) Suspended RX processing fd=13
+
+			2021-01-27T12:30:58Z sched.c:671:(fill_fd_sets) mefi::add fd=13 for SCH_FILE_EXCEPTION
+
+			2021-01-27T12:30:58Z ntp_io_linux.c:482:(resume_socket) Resumed RX processing on timeout fd=13
+
+			=> conlcusion: not returning expected timestamps will degrade the performance of an application!
+		*/
 
 		//no limitations
 		if appServer.EnableTimestampRX && appServer.EnableTimestampTX {
@@ -157,10 +173,36 @@ func (h *AppConnHandler) doRegExchange(appServer *dispatcher.Server) (net.Packet
 			case addr.TxKernelRxKernel:
 				regInfo.TsMode = int(addr.RxKernel)
 				h.TsMode = int(addr.RxKernel)
+				//we can remove the return => do not let the client "crash"
+				return nil, serrors.New("Unsupported mode addr.TxKernelRxKernel")
 			case addr.TxKernelHwRxKernelHw:
 				regInfo.TsMode = int(addr.RxKernelHw)
 				h.TsMode = int(addr.RxKernelHw)
+				//we can remove the return => do not let the client "crash"
+				return nil, serrors.New("Unsupported mode addr.TxKernelHwRxKernelHw")
 			}
+		}
+
+		//remove HwTimestamp flags
+		if appServer.HwTimestampDevice == "" {
+			tsMode := regInfo.TsMode
+
+			fmt.Printf("removing Hw flags. Old=%v ", addr.HostSVC(tsMode))
+
+			switch tsMode {
+			case int(addr.RxKernelHw):
+				tsMode = int(addr.RxKernel)
+				//we can remove the return => do not let the client "crash"
+				return nil, serrors.New("Unsupported mode addr.RxKernelHw")
+			case int(addr.TxKernelHwRxKernelHw):
+				tsMode = int(addr.TxKernelRxKernel)
+				//we can remove the return => do not let the client "crash"
+				return nil, serrors.New("Unsupported mode addr.TxKernelHwRxKernelHw")
+			}
+			regInfo.TsMode = tsMode
+			h.TsMode = tsMode
+
+			fmt.Printf("New=%v ", addr.HostSVC(tsMode))
 		}
 
 		//Set SCVAddress Back to it's default
