@@ -58,7 +58,7 @@ type TsRequest struct {
 }
 
 //TODO change this after debugging
-const TimeoutTxErrMsg = time.Second * 60
+const TimeoutTxErrMsg = time.Second * 3
 
 // TsRequestSet is used to map messages read from the socket's error channel to client connections.
 //

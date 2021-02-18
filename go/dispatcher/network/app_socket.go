@@ -159,7 +159,7 @@ func (h *AppConnHandler) doRegExchange(appServer *dispatcher.Server) (net.Packet
 
 			2021-01-27T12:30:58Z ntp_io_linux.c:482:(resume_socket) Resumed RX processing on timeout fd=13
 
-			=> conlcusion: not returning expected timestamps will degrade the performance of an application!
+			=> conclusion: not returning expected timestamps will degrade the performance of an application!
 		*/
 
 		//no limitations

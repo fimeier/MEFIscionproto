@@ -1,3 +1,18 @@
+##For Experiments
+
+supervisor/supervisorClientP52.sh start sd1-ff00_0_112
+
+mkdir /home/fimeier/Desktop/runningFolderScion
+mkdir /home/fimeier/Desktop/runningFolderScion/logs/
+mkdir /home/fimeier/Desktop/runningFolderScion/gen-cache/
+
+sudo apt-get install supervisor python3-pip net-tools git
+pip3 install supervisor-wildcards
+
+
+supervisor/supervisorClientP52.sh 
+
+
 ## Go stuff
 * siehe hier für rcvmsg go Vorbereitungen der Datenstrukturen... allenfalls kann ich etwas bei mir optimieren /usr/local/go/src/syscall/syscall_linux.go
 * https://golang.org/pkg/net/#InterfaceByIndex

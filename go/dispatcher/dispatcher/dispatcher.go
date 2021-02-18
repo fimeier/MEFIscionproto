@@ -310,7 +310,7 @@ func (o *underlayConnWrapper) ReadFrom(p []byte) (int, net.Addr, error) {
 	// What I really want: Return the meta data, or directly write it into the Packet
 	// Ugly Hack to return meta data (Timestamps) without changing to much in the application's logic
 	// Hint 1: n is not changed. In the worst case, an (unaware) callee will receive additional data, but should ignore them anyway
-	// Hint 2: with this implementaion we lose 52 bytes in max msg size. We could add this to the buffer to compensate
+	// Hint 2: with this implementation we lose 52 bytes in max msg size. We could add this to the buffer to compensate
 	if n+52 < len(p) { //hint len(pkt.buffer)==cap(pkt.buffer) => we do not need to call append
 		binary.LittleEndian.PutUint64(p[n:], uint64(meta.KernelTS.Sec))
 		binary.LittleEndian.PutUint64(p[n+8:], uint64(meta.KernelTS.Nsec))

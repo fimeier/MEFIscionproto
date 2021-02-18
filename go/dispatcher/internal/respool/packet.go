@@ -135,6 +135,10 @@ func (pkt *Packet) Free() {
 }
 
 // DecodeFromConnERRQueue forwards timestamps to the clients
+//
+// Remark: Instead of using the tsRequestChan we could also directly use the message returned by syscall.Recvmsg(),
+// parse the Scion Packet and replace the destination address with the address in the udp packet, forward it to de routing-decision process
+// ...... also ugly i guess....
 func DecodeFromConnERRQueue(conn *net.UDPConn, fd int, tsRequestChan chan common.TsRequest) error {
 	/*
 		called by go/dispatcher/dispatcher/underlay.go::func (dp *NetToRingDataplane) Run()
@@ -149,6 +153,8 @@ func DecodeFromConnERRQueue(conn *net.UDPConn, fd int, tsRequestChan chan common
 	var InterfaceID uint32
 	var PktLengthL2 uint32
 	var Ipi syscall.Inet4Pktinfo
+
+	noQueueMsgToMatch := 0
 
 NEXTROUND:
 	for {
@@ -195,6 +201,8 @@ NEXTROUND:
 				//activate it when you can test it ;-)
 				delete(tsRequestSet, hash)
 			}
+			//case study
+			fmt.Printf("Info: noQueueMsgToMatch=%v len(errQueueMsgSet)=%v len(tsRequestSet)=%v\n", noQueueMsgToMatch, len(errQueueMsgSet), len(tsRequestSet))
 
 		}
 		//We want to remove them to safe space and prevent memory growth
@@ -214,8 +222,6 @@ NEXTROUND:
 			}
 
 		}
-
-		fmt.Printf("len(tsRequestSet)=%v\n", len(tsRequestSet))
 
 		//len(tsRequestSet) == 0 => if we have nothing to compare we must/will wait
 		availableRequests := math.Min(float64(len(tsRequestChan)), 10)
@@ -443,6 +449,9 @@ NEXTROUND:
 			//errQueueMsgSet.Enqueue(safeMe)
 			errQueueMsgSet = append(errQueueMsgSet, safeMe)
 
+			//case study
+			noQueueMsgToMatch++
+
 			continue NEXTROUND //<= ugly jump, but better than returning from this function and calling it again (I guess...)
 		}
 
@@ -568,7 +577,7 @@ func (pkt *Packet) decodeBuffer() error {
 func (pkt *Packet) SendOnConn(conn net.PacketConn, address net.Addr) (int, error) {
 
 	//special mode 1: we request timestamps for this outgoing packet
-	//The condition is fullfilled, if
+	//The condition is fulfilled, if
 	//	a) we have a FD
 	//	b) the packet has flags enable to create Tx timestamps (kernel or kernel and hw)
 	// Result: special syscall to enable TS's and send the message
@@ -630,7 +639,7 @@ func (pkt *Packet) SendOnConn(conn net.PacketConn, address net.Addr) (int, error
 	}
 
 	//special mode 2: We forward a packet on a reliable connection (i.e an applications unix socket)
-	//The condition is fullfilled, if
+	//The condition is fulfilled, if
 	//	a) this is the "internal-ring to application buffer connection"
 	//	b) the client asked for Rx-timestamps
 	// Result: adding TS information to the packet
