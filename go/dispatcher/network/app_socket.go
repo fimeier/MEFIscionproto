@@ -147,7 +147,7 @@ func (h *AppConnHandler) doRegExchange(appServer *dispatcher.Server) (net.Packet
 		//Ignoring Hw Timestamps is "ok" <= Explanation: Nothing will crash, but chrony will wait a few ms.
 		/*
 			What a typicall application will do, as it is expected that HW-Tx(!) timestamps can have a delay of up to 200ms:
-			Hint: File Input will be "ignored", just waiting for the missed HW-Tx-Ts comming in on ERR_Queue/File Exception
+			Hint: File Input will be "ignored", just waiting for the missed HW-Tx-Ts coming in on ERR_Queue/File Exception
 
 			2021-01-27T12:30:58Z sched.c:653:(fill_fd_sets) mefi::add fd=13 for SCH_FILE_INPUT
 			2021-01-27T12:30:58Z sched.c:671:(fill_fd_sets) mefi::add fd=13 for SCH_FILE_EXCEPTION
