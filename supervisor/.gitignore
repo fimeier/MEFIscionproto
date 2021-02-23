@@ -1,0 +1,13 @@
+supervisorAll.sh
+supervisorAS110_AS112.sh
+supervisorAS111.sh
+supervisorBACKUP.sh
+supervisorClientBernina.sh
+supervisorClientP52.sh
+supervisordAll.conf
+supervisordAS110_AS112.conf
+supervisordAS111.conf
+supervisordBackup.conf
+supervisordClientBernina.conf
+supervisordClientP52.conf
+supervisord.conf_Backup
